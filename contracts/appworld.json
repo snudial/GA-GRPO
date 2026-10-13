@@ -1,7 +1,7 @@
 {
   "env": "appworld",
   "name": "appworld_react30_c20480_r129600",
-  "source": "appworld_react30_c20480_r86400_20260916_v10_execcompat_seed43 setup.json + the later server crash fix (appworld_ga/operation_diagnostics.py); budget extended 86400 -> 129600 (three more 14400 milestones) on 2026-10-09 to continue the seed-43 8B runs",
+  "source": "AppWorld ReAct protocol (30 turns, 20,480-token context) with milestones every 14,400 generated rollouts",
   "splits": {
     "train": 90,
     "dev": 57,
@@ -21,8 +21,7 @@
   "curriculum": {
     "initial_h": {
       "grpo": 0,
-      "ga-grpo": "h_max",
-      "need-based-ga-grpo": 0
+      "call-threshold": "h_max"
     },
     "promote_at": 0.7,
     "demote_at": 0.1,
@@ -31,7 +30,7 @@
   "reward": "strict terminal binary; no overlong shaping",
   "eval": {
     "selection": "dev avg@3 during training (in_training_dev_interval steps) and at the final checkpoint; earliest step on ties",
-    "test": "test_normal and test_challenge, 8 decodes (decode d: seed 20260826+d), h=0, on the final checkpoint and the dev-selected one only"
+    "test": "test_normal and test_challenge, 3 decodes (decode d: seed 20260826+d), h=0, on the final checkpoint and the dev-selected one only"
   },
   "setup_fields": {
     "milestones": [
@@ -60,8 +59,7 @@
     },
     "in_training_dev_interval": {
       "grpo": 10,
-      "ga-grpo": 10,
-      "need-based-ga-grpo": 5
+      "call-threshold": 10
     },
     "authorized_h_caps": {
       "2a163ab_3": 13,
@@ -84,11 +82,7 @@
     },
     "methods": [
       "grpo",
-      "dapo",
-      "ga-grpo",
-      "need-based-ga-grpo",
-      "ga-grpo-call-bandit",
-      "ga-grpo-call-uniform"
+      "call-threshold"
     ],
     "seeds": [
       42,

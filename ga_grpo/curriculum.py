@@ -15,6 +15,11 @@ import json
 import os
 from datetime import datetime, timezone
 
+try:  # ga_grpo/ is also on sys.path as a plain directory (bfcl_agent.py: `from curriculum import ...`)
+    from . import h_selector
+except ImportError:
+    import h_selector
+
 STATE_PATH = os.environ.get(
     "EXP2_CURRICULUM_STATE", "/tmp/exp2_curriculum.json")
 WINDOW = int(os.environ.get("EXP2_CURRICULUM_WINDOW", "8"))
@@ -89,8 +94,30 @@ def _adaptive_step(h, rate, H, turn_starts):
     return h
 
 
+def policy_version():
+    """Weight version stamped by the trainer (EXP2_VERSION_FILE) at each sync; 0 before the first."""
+    path = os.environ.get("EXP2_VERSION_FILE")
+    try:
+        with open(path) as f:
+            return int(float(f.read().strip() or 0))
+    except (OSError, TypeError, ValueError):
+        return 0
+
+
+def _entry(state, task_id, h_init):
+    entry = state.get(task_id)
+    if entry is None:
+        entry = {"h": int(h_init), "n": 0, "succ": 0}
+        state[task_id] = entry
+    return entry
+
+
+def _clamp(h, H):
+    return max(0, min(int(h), max(0, H - 1)))
+
+
 def current_h(task_id, h_init, H):
-    """Handoff turn to use for the next rollout of this task."""
+    """Handoff turn to use for the next rollout of this task (legacy: no group identity)."""
     with _open() as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         try:
@@ -100,17 +127,86 @@ def current_h(task_id, h_init, H):
                 entry = {"h": int(h_init), "n": 0, "succ": 0}
                 state[task_id] = entry
                 _save(f, state)
-            return max(0, min(int(entry["h"]), max(0, H - 1)))
+            return _clamp(entry["h"], H)
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
-def record(task_id, success, H, turn_starts=None):
-    """Log one episode outcome; step h when the window says so.
+def assign(task_id, h_init, H):
+    """Lease one slot of the task's current group: returns (group_id, h).
 
-    With `turn_starts` (call-level positions), h is a position index and the
-    step size adapts to the window (see `_adaptive_step`); otherwise h moves
-    exactly one turn.
+    A group is fixed when it opens (id, h, planned size WINDOW, policy version); its
+    WINDOW rollouts all receive that h, whatever the state does meanwhile. Once the
+    group has handed out WINDOW slots the next caller opens a new group at the
+    task's current h; a full group whose rollouts are still running waits in
+    `pending` until they report (see record)."""
+    with _open() as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            state = _load(f)
+            entry = _entry(state, task_id, h_init)
+            group = entry.get("open")
+            if group is None or group["started"] >= group["planned"]:
+                if group is not None:
+                    entry.setdefault("pending", []).append(group)
+                entry["seq"] = entry.get("seq", 0) + 1
+                group = {"id": f"{task_id}:{entry['seq']}", "h": _clamp(entry["h"], H), "planned": WINDOW,
+                         "started": 0, "done": [], "succ": 0, "policy_version": policy_version()}
+                entry["open"] = group
+            group["started"] += 1
+            _save(f, state)
+            return group["id"], group["h"]
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def _event(payload):
+    with open(STATE_PATH + ".events.jsonl", "a") as events:
+        events.write(json.dumps({"timestamp": datetime.now(timezone.utc).isoformat(), **payload},
+                                sort_keys=True) + "\n")
+        events.flush()
+        os.fsync(events.fileno())
+
+
+def _step_h(task_id, entry, previous_h, successes, count, H, turn_starts, group_version):
+    """Move the task's h from one closed group's outcome; returns the event fields."""
+    rate = successes / count
+    selector = os.environ.get("BFCL_H_SELECTOR", "window")
+    fields = {"h_before": previous_h, "success_rate": rate, "selector": selector, "candidates": None,
+              "selection": None, "decay_factor": None}
+    if selector != "window":
+        stats = entry.setdefault("stats", {})
+        cfg = h_selector.settings()
+        now = policy_version()
+        factor = h_selector.decay_factor(now - entry.get("stats_version", now), cfg["decay"], cfg["updates_per_epoch"])
+        h_selector.observe(stats, previous_h, successes, count - successes, factor)
+        entry["stats_version"] = now
+        entry["windows"] = entry.get("windows", 0) + 1
+        positions = list(range(max(1, H)))
+        entry["h"], selection = h_selector.choose(selector, stats, positions,
+                                                  h_selector.rng_for(task_id, entry["windows"]), group=count)
+        fields.update(candidates={str(p): h_selector.posterior(stats, p) for p in positions},
+                      selection=selection, decay_factor=factor, policy_version_now=now)
+    elif turn_starts is not None:
+        entry["h"] = _adaptive_step(entry["h"], rate, H, turn_starts)
+    elif rate >= PROMOTE_AT and entry["h"] > 0:
+        # BFCL tasks are short. Move exactly one turn per window so
+        # every handoff depth is trained and its transfer measured.
+        entry["h"] -= 1
+    elif rate <= DEMOTE_AT and entry["h"] < max(0, H - 1):
+        entry["h"] += 1          # task went out of reach; back off
+    fields["h_after"] = entry["h"]
+    return fields
+
+
+def record(task_id, success, H, turn_starts=None, *, group_id=None, rollout_id=None):
+    """Log one episode outcome; step h when its group is complete.
+
+    With `group_id` (from assign) the outcome joins that group: a rollout reported twice
+    counts once, the group closes exactly once when all of its planned rollouts reported,
+    and a group that can never complete (a dropped rollout) is closed as `incomplete`,
+    excluded from the h update and the selector's records, when a newer group of the
+    task closes. Without a group id the legacy per-task window counter is used.
 
     Returns the (possibly unchanged) h for logging.
     """
@@ -119,37 +215,58 @@ def record(task_id, success, H, turn_starts=None):
         try:
             state = _load(f)
             entry = state.setdefault(task_id, {"h": 0, "n": 0, "succ": 0})
-            entry["n"] += 1
-            entry["succ"] += int(bool(success))
-            if entry["n"] >= WINDOW:
-                rate = entry["succ"] / entry["n"]
-                previous_h = entry["h"]
-                if turn_starts is not None:
-                    entry["h"] = _adaptive_step(entry["h"], rate, H, turn_starts)
-                elif rate >= PROMOTE_AT and entry["h"] > 0:
-                    # BFCL tasks are short. Move exactly one turn per window so
-                    # every handoff depth is trained and its transfer measured.
-                    entry["h"] -= 1
-                elif rate <= DEMOTE_AT and entry["h"] < max(0, H - 1):
-                    entry["h"] += 1          # task went out of reach; back off
-                entry["n"] = 0
-                entry["succ"] = 0
+            unit = "call" if turn_starts is not None else "turn"
+            if group_id is None:
+                entry["n"] += 1
+                entry["succ"] += int(bool(success))
+                if entry["n"] >= WINDOW:
+                    fields = _step_h(task_id, entry, entry["h"], entry["succ"], entry["n"], H, turn_starts, None)
+                    entry["n"] = 0
+                    entry["succ"] = 0
+                    _save(f, state)
+                    _event({"task_id": task_id, "window": WINDOW, "unit": unit, "group_id": None,
+                            "rollouts": WINDOW, "status": "complete", **fields})
+                else:
+                    _save(f, state)
+                return entry["h"]
+
+            groups = ([entry["open"]] if entry.get("open") else []) + entry.get("pending", [])
+            group = next((g for g in groups if g["id"] == group_id), None)
+            if group is None:
+                _event({"task_id": task_id, "group_id": group_id, "rollout_id": rollout_id, "status": "orphan",
+                        "unit": unit, "h_before": entry["h"], "h_after": entry["h"]})
+                return entry["h"]
+            if rollout_id in group["done"]:
+                _event({"task_id": task_id, "group_id": group_id, "rollout_id": rollout_id, "status": "duplicate",
+                        "unit": unit, "h_before": entry["h"], "h_after": entry["h"]})
+                return entry["h"]
+            group["done"].append(rollout_id)
+            group["succ"] += int(bool(success))
+            if len(group["done"]) < group["planned"]:
                 _save(f, state)
-                event_path = STATE_PATH + ".events.jsonl"
-                with open(event_path, "a") as events:
-                    events.write(json.dumps({
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "task_id": task_id,
-                        "h_before": previous_h,
-                        "h_after": entry["h"],
-                        "success_rate": rate,
-                        "window": WINDOW,
-                        "unit": "call" if turn_starts is not None else "turn",
-                    }, sort_keys=True) + "\n")
-                    events.flush()
-                    os.fsync(events.fileno())
-            else:
-                _save(f, state)
+                return entry["h"]
+            # The group is complete: it alone moves h. A group whose rollouts were started two
+            # groups ago and still has not reported in full has lost a rollout (the runner drops
+            # a failed one): an infrastructure loss, not a task failure, so it is closed as
+            # incomplete and excluded from the records. One newer completion is not enough:
+            # two groups of a task can legitimately run and finish interleaved.
+            fields = _step_h(task_id, entry, group["h"], group["succ"], group["planned"], H, turn_starts,
+                             group["policy_version"])
+            pending = entry.get("pending", [])
+            seq = int(group["id"].rsplit(":", 1)[1])
+            older = [g for g in pending if int(g["id"].rsplit(":", 1)[1]) <= seq - 2]
+            for g in older:
+                _event({"task_id": task_id, "group_id": g["id"], "unit": unit, "status": "incomplete",
+                        "rollouts": len(g["done"]), "planned": g["planned"], "h_before": g["h"], "h_after": entry["h"],
+                        "success_rate": (g["succ"] / len(g["done"])) if g["done"] else None,
+                        "policy_version_at_assign": g["policy_version"]})
+            entry["pending"] = [g for g in pending if g is not group and g not in older]
+            if entry.get("open") is group:
+                entry["open"] = None
+            _save(f, state)
+            _event({"task_id": task_id, "group_id": group["id"], "window": WINDOW, "unit": unit,
+                    "rollouts": group["planned"], "planned": group["planned"], "status": "complete",
+                    "policy_version_at_assign": group["policy_version"], **fields})
             return entry["h"]
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)

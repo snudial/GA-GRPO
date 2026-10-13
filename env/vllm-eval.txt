@@ -1,5 +1,5 @@
 # vLLM serving venv for the official evaluation pool (BFCL_VLLM_VENV), python 3.12.3.
-# Exact package set of shbae/OPSD-BASE/.venv/vllm-b200 on the 4xB200 node, 2026-10-02 (`uv pip freeze`).
+# Exact package set of the evaluation (vLLM) environment used for the experiments (`uv pip freeze`, 2026-10-02).
 # Installed with `uv pip install --no-deps -r` by scripts/bootstrap.sh, so nothing is re-resolved.
 
 aiohappyeyeballs==2.7.1

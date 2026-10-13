@@ -1,5 +1,5 @@
 {
-  "_doc": "GA-GRPO methods for run.py. Guide assistance, handoff unit, initialization and selection are independent switches.",
+  "_doc": "Training methods for run.py, named as in the paper. A method is only its switches: BFCL_CURRICULUM turns guide-assisted starts on, BFCL_HANDOFF_UNIT picks turn or call handoffs, BFCL_CURRICULUM_INIT picks the initial handoff (default: End, before the guide's final user turn; autonomous: Start, h = 0), and BFCL_H_SELECTOR picks the movement rule (default: Threshold; uniform; bandit). AppWorld handoffs are between executed code blocks (Call-level).",
   "grpo": {
     "bfcl": {
       "ALGO": "grpo",
@@ -11,54 +11,55 @@
     "bfcl": {
       "ALGO": "dapo",
       "BFCL_CURRICULUM": "0"
-    },
-    "appworld": {}
+    }
   },
-  "ga-grpo": {
-    "bfcl": {
-      "ALGO": "grpo",
-      "BFCL_CURRICULUM": "1"
-    },
-    "appworld": {}
-  },
-  "need-based-ga-grpo": {
+  "turn-threshold-start": {
     "bfcl": {
       "ALGO": "grpo",
       "BFCL_CURRICULUM": "1",
       "BFCL_CURRICULUM_INIT": "autonomous"
-    },
-    "appworld": {}
+    }
   },
-  "ga-grpo-call-second-last": {
+  "turn-threshold-end": {
+    "bfcl": {
+      "ALGO": "grpo",
+      "BFCL_CURRICULUM": "1"
+    }
+  },
+  "turn-bandit": {
+    "bfcl": {
+      "ALGO": "grpo",
+      "BFCL_CURRICULUM": "1",
+      "BFCL_HANDOFF_UNIT": "turn",
+      "BFCL_CURRICULUM_INIT": "second_last_turn",
+      "BFCL_H_SELECTOR": "bandit"
+    }
+  },
+  "call-threshold": {
     "bfcl": {
       "ALGO": "grpo",
       "BFCL_CURRICULUM": "1",
       "BFCL_HANDOFF_UNIT": "call",
       "BFCL_CURRICULUM_INIT": "second_last_turn"
-    }
-  },
-  "ga-grpo-call-bandit": {
-    "bfcl": {
-      "ALGO": "grpo",
-      "BFCL_CURRICULUM": "1",
-      "BFCL_HANDOFF_UNIT": "call",
-      "BFCL_CURRICULUM_INIT": "second_last_turn",
-      "BFCL_H_SELECTOR": "bandit"
     },
-    "appworld": {
-      "EXP2_H_SELECTOR": "bandit"
-    }
+    "appworld": {}
   },
-  "ga-grpo-call-uniform": {
+  "call-uniform": {
     "bfcl": {
       "ALGO": "grpo",
       "BFCL_CURRICULUM": "1",
       "BFCL_HANDOFF_UNIT": "call",
       "BFCL_CURRICULUM_INIT": "second_last_turn",
       "BFCL_H_SELECTOR": "uniform"
-    },
-    "appworld": {
-      "EXP2_H_SELECTOR": "uniform"
+    }
+  },
+  "call-bandit": {
+    "bfcl": {
+      "ALGO": "grpo",
+      "BFCL_CURRICULUM": "1",
+      "BFCL_HANDOFF_UNIT": "call",
+      "BFCL_CURRICULUM_INIT": "second_last_turn",
+      "BFCL_H_SELECTOR": "bandit"
     }
   }
 }

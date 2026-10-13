@@ -131,9 +131,9 @@ class EpisodeType(str, Enum):
 
 
 _EPISODE_TYPE_KO: dict[EpisodeType, str] = {
-    EpisodeType.CLEAN_RECOVERY: "완전 복구형",
-    EpisodeType.COSTLY_RECOVERY: "비용 복구형",
-    EpisodeType.UNRESOLVED_FAILURE: "실패 잔존형",
+    EpisodeType.CLEAN_RECOVERY: "clean recovery",
+    EpisodeType.COSTLY_RECOVERY: "costly recovery",
+    EpisodeType.UNRESOLVED_FAILURE: "unresolved failure",
 }
 
 
@@ -182,12 +182,12 @@ class ClassificationStatus(str, Enum):
 
 
 _CLASSIFICATION_STATUS_KO: dict[ClassificationStatus, str] = {
-    ClassificationStatus.LABELED: "분류됨",
-    ClassificationStatus.ABSTAINED_UNKNOWN_STATE: "판정 보류: 상태 미상",
-    ClassificationStatus.ABSTAINED_UNCOVERED_EFFECT: "판정 보류: 미관측 효과",
-    ClassificationStatus.ABSTAINED_COST_UNKNOWN: "판정 보류: 비용 미상",
-    ClassificationStatus.EXCLUDED_SUPERSEDED: "제외: 목표 변경",
-    ClassificationStatus.EXCLUDED_UNSCOREABLE: "제외: 채점 불가",
+    ClassificationStatus.LABELED: "labeled",
+    ClassificationStatus.ABSTAINED_UNKNOWN_STATE: "abstained: unknown state",
+    ClassificationStatus.ABSTAINED_UNCOVERED_EFFECT: "abstained: uncovered effect",
+    ClassificationStatus.ABSTAINED_COST_UNKNOWN: "abstained: cost unknown",
+    ClassificationStatus.EXCLUDED_SUPERSEDED: "excluded: superseded target",
+    ClassificationStatus.EXCLUDED_UNSCOREABLE: "excluded: unscoreable",
 }
 
 
@@ -244,10 +244,10 @@ class EpisodeCloseReason(str, Enum):
 
 
 _CLOSE_REASON_KO: dict[EpisodeCloseReason, str] = {
-    EpisodeCloseReason.RECOVERED_BY_ACTION: "행동에 의한 복구",
-    EpisodeCloseReason.SUPERSEDED_BY_TARGET: "목표 변경으로 소멸",
-    EpisodeCloseReason.TERMINAL_UNRESOLVED: "미해결 종료",
-    EpisodeCloseReason.UNKNOWN: "판정 불가",
+    EpisodeCloseReason.RECOVERED_BY_ACTION: "recovered by action",
+    EpisodeCloseReason.SUPERSEDED_BY_TARGET: "superseded by target",
+    EpisodeCloseReason.TERMINAL_UNRESOLVED: "terminal unresolved",
+    EpisodeCloseReason.UNKNOWN: "unknown",
 }
 
 

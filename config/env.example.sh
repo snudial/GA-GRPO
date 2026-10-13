@@ -43,5 +43,3 @@ export CACHE_ROOT="${CACHE_ROOT:-$_PREFIX/cache}"                  # compile cac
 export APPWORLD_ROOT="${APPWORLD_ROOT:-$CACHE_ROOT/appworld_root}"    # writable; AppWorld servers keep worlds here
 export APPWORLD_SETUPS="${APPWORLD_SETUPS:-$RUN_ROOT/appworld_setups}"  # sealed setups built by run.py
 export BFCL_PROTOBUF_OVERLAY="${BFCL_PROTOBUF_OVERLAY:-$CACHE_ROOT/bfcl_protobuf_overlay}"
-# Optional: a GPU idle keeper with keeper_client.py (run.py reserves and waits for free GPUs).
-# export GPU_KEEPER_DIR=/path/to/gpu_idle_keeper

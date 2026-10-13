@@ -344,6 +344,10 @@ class FsdpStrategy:
 
             optimizer = build_automodel_muon_optimizer(train_model, cfg["muon"], adam, self.device_mesh)
         elif kind == "adam":
+            # The CPU-offloaded step (optimizer_offload.py) runs this optimizer on CPU
+            # tensors: the per-tensor reference loop is ~7x slower than torch's fused
+            # CPU AdamW there (same update up to fp32 rounding). GPU path unchanged.
+            cpu_fused = self.offload_optimizer and os.environ.get("MOLT_CPU_ADAM_FUSED", "1") == "1"
             optimizer = torch.optim.AdamW(
                 params,
                 lr=adam["lr"],
@@ -351,7 +355,7 @@ class FsdpStrategy:
                 eps=adam["eps"],
                 weight_decay=adam["weight_decay"],
                 foreach=False,
-                fused=False,
+                fused=cpu_fused,
             )
         else:
             raise ValueError(f"Unsupported optimizer: {kind}")
@@ -479,6 +483,14 @@ class FsdpStrategy:
         if scheduler is not None:
             scheduler.step()
         optimizer.zero_grad(set_to_none=True)
+
+    def init_optimizer_state_for_load(self, optimizer: optim.Optimizer) -> None:
+        """Before a DCP optimizer load: with the CPU-offloaded optimizer, create the Adam
+        state on CPU first (optimizer_offload.py), or DCP's own initialization creates it
+        on the GPU params and a 4B resume OOMs next to the resident vLLM. No-op otherwise."""
+        if self._optimizer_offloader is not None:
+            params = [p for group in optimizer.param_groups for p in group["params"] if p.requires_grad]
+            self._optimizer_offloader.init_state_on_cpu(optimizer, params)
 
     def offload_moments_to_cpu(self, optimizer: optim.Optimizer) -> None:
         """Page the Adam moments back to CPU after a checkpoint resume (DCP restores

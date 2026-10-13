@@ -1,5 +1,5 @@
 # Molt trainer venv (MOLT_VENV), python 3.12.3.
-# Exact package set of mckim/environment/venv on the 4xB200 node, 2026-10-02 (`uv pip freeze`).
+# Exact package set of the training (Molt) environment used for the experiments (`uv pip freeze`, 2026-10-02).
 # Installed with `uv pip install --no-deps -r` by scripts/bootstrap.sh, so nothing is re-resolved.
 # Not listed here, installed separately by bootstrap.sh:
 #   torch==2.13.0+cu130            from https://download.pytorch.org/whl/cu130

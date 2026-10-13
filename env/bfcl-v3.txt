@@ -1,5 +1,5 @@
 # BFCL CLI venv for BFCL_PROFILE=crest_compat (BFCL_VENV), python 3.12.3. Optional (bootstrap.sh --with-crest).
-# Exact package set of shbae/OPSD-BASE/.venv/bfcl on the 4xB200 node, 2026-10-02 (`uv pip freeze`).
+# Exact package set of the BFCL v3 environment used for the experiments (`uv pip freeze`, 2026-10-02).
 # Installed with `uv pip install --no-deps -r` by scripts/bootstrap.sh, so nothing is re-resolved.
 # bfcl_eval itself is an editable install of the pinned gorilla checkout (ea13468), done by bootstrap.sh.
 accelerate==1.14.0

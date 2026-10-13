@@ -78,6 +78,23 @@ _CUSTOM_ATTN_IMPLEMENTATIONS = {"te", "sdpa", "flex", "tilelang"}
 _ALL_ATTN_IMPLEMENTATIONS = _HF_ATTN_IMPLEMENTATIONS | _CUSTOM_ATTN_IMPLEMENTATIONS
 
 
+def _cast_te_attention_inputs(model: nn.Module, dtype: torch.dtype) -> None:
+    """Under single-rank autocast, RMSNorm'd q/k stay fp32 while v is the autocast
+    dtype; TE DotProductAttention requires one dtype, so cast its tensor inputs."""
+    try:
+        from transformer_engine.pytorch.attention import DotProductAttention
+    except ImportError:
+        return
+
+    def _cast(_module, args, kwargs):
+        args = tuple(a.to(dtype) if torch.is_tensor(a) and a.is_floating_point() else a for a in args)
+        return args, kwargs
+
+    for module in model.modules():
+        if isinstance(module, DotProductAttention):
+            module.register_forward_pre_hook(_cast, with_kwargs=True)
+
+
 def _validate_attn_implementation(attn_implementation: str) -> None:
     if attn_implementation not in _ALL_ATTN_IMPLEMENTATIONS:
         choices = ", ".join(sorted(_ALL_ATTN_IMPLEMENTATIONS))
@@ -346,6 +363,16 @@ class BaseModel(nn.Module):
         # MixedPrecisionPolicy(param_dtype=bf16) do bf16 fwd/bwd. A bf16 master
         # rounds away AdamW updates (~LR < bf16 ULP) at small LR, so the MoE never learns.
         torch_dtype = compute_dtype if not use_fp32_master_weights else torch.float32
+        # AutoModel skips FSDP2 parallelization on a single rank, so the
+        # MixedPrecisionPolicy that casts fp32 master weights to compute_dtype is
+        # never applied and fwd/bwd silently run in fp32 (slow; TE/flash kernels
+        # refuse fp32). Autocast restores compute_dtype compute on that path only.
+        self._single_rank_autocast_dtype = (
+            compute_dtype
+            if torch_dtype == torch.float32 and compute_dtype != torch.float32
+            and (not dist.is_initialized() or dist.get_world_size() == 1)
+            else None
+        )
         self.is_vlm = is_vlm_model(pretrain_or_model)
 
         if self.is_vlm:
@@ -445,6 +472,8 @@ class BaseModel(nn.Module):
             **backend_kwarg,
         )
         self.model = move_model_to_cpu_for_offload(self.model, distributed_config)
+        if self._single_rank_autocast_dtype is not None:
+            _cast_te_attention_inputs(self.model, self._single_rank_autocast_dtype)
         # from_pretrained may downgrade to HF even when custom was requested;
         # re-derive from the loaded class so the forward picks the right pack style.
         self._packing_style = "automodel" if is_automodel_custom_model(self.model) else "hf"
@@ -643,16 +672,6 @@ class BaseModel(nn.Module):
             # https://github.com/OpenRLHF/OpenRLHF/issues/217
             rolled_sequences = torch.roll(sequences, shifts=-1, dims=1)
             forward_attention_mask = attention_mask
-            # An all-ones padded mask is plain causal attention. Passing it anyway
-            # forces SDPA off the flash kernel (and the GQA path to repeat K/V), so
-            # drop it: identical math, far less time and memory at long context.
-            if (
-                os.environ.get("MOLT_SKIP_FULL_ATTENTION_MASK", "0") == "1"
-                and attention_mask is not None
-                and not getattr(self, "is_vlm", False)
-                and bool(attention_mask.all())
-            ):
-                forward_attention_mask = None
 
             if getattr(self, "is_vlm", False):
                 if mm_inputs:
@@ -809,7 +828,11 @@ class BaseModel(nn.Module):
             )
             if output_hidden_states:
                 forward_kwargs["output_hidden_states"] = True
-            with replay_ctx:
+            autocast_dtype = getattr(self, "_single_rank_autocast_dtype", None)
+            autocast_ctx = (
+                torch.autocast(device_type="cuda", dtype=autocast_dtype) if autocast_dtype is not None else nullcontext()
+            )
+            with replay_ctx, autocast_ctx:
                 output = self.model(**forward_kwargs)
         # AutoModel's custom MoE/LLM models (e.g. Qwen3MoeForCausalLM) return a
         # raw logits Tensor; HF returns a ModelOutput with `.logits`. Normalize.

@@ -378,6 +378,11 @@ class CheckpointManager:
             from nemo_automodel.components.checkpoint.stateful_wrappers import OptimizerState
             from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 
+            # With --fsdp.offload optimizer, create the Adam state on CPU before DCP's
+            # get_optimizer_state_dict does it on the GPU params (a 4B resume OOMed there).
+            init_for_load = getattr(self.strategy, "init_optimizer_state_for_load", None)
+            if init_for_load is not None:
+                init_for_load(optimizer)
             optimizer_state = OptimizerState(model, optimizer, scheduler)
             optim_state_dict = optimizer_state.state_dict()
             dcp.load(
@@ -385,9 +390,21 @@ class CheckpointManager:
                 checkpoint_id=optim_dir,
                 planner=DefaultLoadPlanner(allow_partial_load=True),
             )
-            optimizer_state.load_state_dict(optim_state_dict)
-            # With --fsdp.offload optimizer the Adam moments must live on CPU; DCP
-            # restores them onto the model param's GPU device, so page them back.
+            if init_for_load is not None and getattr(self.strategy, "offload_optimizer", False):
+                # dcp.load filled the optimizer's own CPU state tensors in place
+                # (get_optimizer_state_dict hands out the optimizer's tensors, not
+                # copies), so the moments are restored already. set_optimizer_state_dict
+                # would now re-cast every value onto the param's device, the GPU (torch's
+                # Optimizer.load_state_dict policy), and a 4B resume OOMed there. Restore
+                # only the scheduler, and the param-group lr it had at the checkpoint.
+                if scheduler is not None and "sched" in optim_state_dict:
+                    scheduler.load_state_dict(optim_state_dict["sched"])
+                    for group, lr in zip(optimizer.param_groups, scheduler.get_last_lr()):
+                        group["lr"] = lr
+            else:
+                optimizer_state.load_state_dict(optim_state_dict)
+            # With --fsdp.offload optimizer the Adam moments must live on CPU (a no-op
+            # after the in-place load above; kept for any state DCP put elsewhere).
             self.strategy.offload_moments_to_cpu(optimizer)
 
         # Resumable client state (consumed_samples, dataloader/RNG state, RL
