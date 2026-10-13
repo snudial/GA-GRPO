@@ -12,7 +12,7 @@ def install():
     from bfcl_eval.model_handler.local_inference.qwen_fc import QwenFCHandler
 
     def format_prompt(self, messages, function):
-        if self.tokenizer.init_kwargs.get("jump_grpo_serialization") != "qwen3_append_only_v1":
+        if self.tokenizer.init_kwargs.get("ga_grpo_serialization") != "qwen3_append_only_v1":
             raise ValueError("Append-only evaluation requires an append-only checkpoint tokenizer")
         return self.tokenizer.apply_chat_template(
             messages, tools=function, tokenize=False, add_generation_prompt=True,

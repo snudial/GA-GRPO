@@ -22,7 +22,7 @@ def prepare(source: Path, target: Path, *, append_only: bool = False):
             "        {%- endif %}\n"
             "        {{- '<|im_start|>assistant\\n<think>\\n\\n</think>\\n\\n' + content }}\n"
         ) + template[end:]
-        original["jump_grpo_serialization"] = "qwen3_append_only_v1"
+        original["ga_grpo_serialization"] = "qwen3_append_only_v1"
     expected = {**revision, "enable_thinking": False,
                 "original_template_sha256": hashlib.sha256(original["chat_template"].encode()).hexdigest(),
                 "template_sha256": hashlib.sha256(template.encode()).hexdigest()}

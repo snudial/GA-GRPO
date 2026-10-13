@@ -560,7 +560,7 @@ if __name__ == "__main__":
         "--algo.dynamic_filtering_fill_batch",
         action="store_true",
         default=False,
-        help="JUMP-GRPO/DAPO: keep sampling across epoch boundaries until rollout.batch_size groups pass "
+        help="GA-GRPO/DAPO: keep sampling across epoch boundaries until rollout.batch_size groups pass "
         "the dynamic filter (DAPO dynamic sampling). Off = upstream GRPO behaviour: an epoch that ends "
         "early trains on the partial batch. Requires --algo.dynamic_filtering_enable.",
     )
@@ -788,7 +788,7 @@ if __name__ == "__main__":
         "--train.max_train_groups",
         type=int,
         default=0,
-        help="JUMP-GRPO: stop once this many prompt groups have passed the dynamic filter and been "
+        help="GA-GRPO: stop once this many prompt groups have passed the dynamic filter and been "
         "shipped to the trainer (cumulative across resumes; 0 = unlimited). A budget in learning "
         "signal rather than episodes, so partial-batch GRPO and full-batch DAPO get equal signal. "
         "--train.num_episodes then acts as an upper bound.",

@@ -507,7 +507,7 @@ def _budget_generator(monkeypatch, fill, *, reject_all=False):
     return gen
 
 
-@pytest.mark.parametrize("method", ["grpo", "jump-grpo", "dapo"])
+@pytest.mark.parametrize("method", ["grpo", "ga-grpo", "dapo"])
 @pytest.mark.parametrize("reject_all", [False, True])
 def test_exact_generated_budget_segment_3_to_5_and_completed_noop(monkeypatch, method, reject_all):
     from molt.trainer.rl_trainer import _checkpoint_episode

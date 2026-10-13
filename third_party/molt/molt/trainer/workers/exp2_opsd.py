@@ -1,4 +1,4 @@
-# exp2 (mckim workspace): EMA self-teacher + privileged boundary OPSD.
+# exp2: EMA self-teacher + privileged boundary OPSD (optional; not used in the paper).
 #
 # Verifier-gated hybrid: groups with reward variation train through the normal
 # group-relative PG path (see the "verifier_gated" advantage estimator); groups

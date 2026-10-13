@@ -293,7 +293,7 @@ async def _run_turn(state: ChatServerState, session: _Session, body: dict) -> tu
     extends = bool(session.trajectories) and messages[: len(session.last_messages)] == session.last_messages
     chat, pil_images = _messages_to_chat(state, messages)
     full = state.processor.apply_chat_template(chat, tokenize=False, add_generation_prompt=True, **kwargs)
-    append_only = getattr(state.processor, "init_kwargs", {}).get("jump_grpo_serialization") == "qwen3_append_only_v1"
+    append_only = getattr(state.processor, "init_kwargs", {}).get("ga_grpo_serialization") == "qwen3_append_only_v1"
     if extends:
         if append_only:
             # Retain all feedback messages and the assistant terminator, including

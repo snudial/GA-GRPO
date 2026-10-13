@@ -289,7 +289,7 @@ class SamplesGenerator:
                     # trained on a budget-overshooting batch. Drain pending work.
                     self._dataloader_iter = None
                 elif dataloader_exhausted:
-                    # DAPO-style dynamic sampling (JUMP-GRPO): when the epoch ends before
+                    # DAPO-style dynamic sampling (GA-GRPO): when the epoch ends before
                     # `rollout.batch_size` accepted groups exist, continue into the next
                     # epoch instead of emitting a partial batch. Plain GRPO (flag off)
                     # keeps the upstream behaviour: train on whatever the epoch yielded.
@@ -371,7 +371,7 @@ class SamplesGenerator:
         return batch_samples, rollout_metrics, prompts_dispatched, exhausted
 
     # ------------------------------------------------------------------ DAPO fill
-    # JUMP-GRPO: `--algo.dynamic_filtering_fill_batch` turns dynamic filtering into
+    # GA-GRPO: `--algo.dynamic_filtering_fill_batch` turns dynamic filtering into
     # DAPO-style dynamic sampling. Upstream refills dropped groups only while the
     # current epoch has prompts left, so with a 100-prompt dataset every batch ends
     # at the epoch boundary with ~15 groups instead of `rollout.batch_size`. In fill

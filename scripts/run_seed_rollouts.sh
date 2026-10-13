@@ -18,7 +18,7 @@ TARGET_EPISODES="${TARGET_EPISODES:-30 50}"
 
 case "$ALGO" in grpo|dapo) ;; *) echo "algo must be grpo or dapo" >&2; exit 2 ;; esac
 case "$MODE" in
-  jump) RUN="${4:-bfcl_v3_jump_grpo_base100_4b_seed${SEED}_r80k_val25_test75_${TAG}}"
+  jump) RUN="${4:-bfcl_ga_grpo_base100_4b_seed${SEED}_r80k_val25_test75_${TAG}}"
         DATA="$ROOT/data/bfcl/bfcl_jumpstart_train.jsonl"; CURR=1; METHOD=turn-threshold-end ;;
   grpo) RUN="${4:-bfcl_v3_${ALGO}_base100_4b_seed${SEED}_r80k_val25_test75_${TAG}}"
         DATA="$ROOT/data/bfcl/bfcl_train.jsonl"; CURR=0; METHOD="$ALGO" ;;

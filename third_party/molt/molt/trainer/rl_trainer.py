@@ -672,7 +672,7 @@ class BaseRLTrainer:
             "episode": 0,
             "global_step": 0,
             "total_consumed_prompts": 0,
-            "total_trained_groups": 0,  # JUMP-GRPO: accepted prompt groups shipped to the trainer
+            "total_trained_groups": 0,  # GA-GRPO: accepted prompt groups shipped to the trainer
             "data_loader_state_dict": {},
         }
 
@@ -775,7 +775,7 @@ class GenerateSamplesActor:
         if total_consumed_prompts == maximum_prompts:
             self.rollout_queue.put("done", block=True)
             return
-        # JUMP-GRPO: optional budget in ACCEPTED prompt groups (the units that carry
+        # GA-GRPO: optional budget in ACCEPTED prompt groups (the units that carry
         # gradient). 0 = unlimited. Lets GRPO (partial batches) and DAPO (full
         # batches) consume the same amount of learning signal regardless of how
         # many optimizer steps that takes; the run stops when the budget is spent
@@ -803,7 +803,7 @@ class GenerateSamplesActor:
         # normal eval_steps multiples a continuous run would hit (no per-resume eval).
         # Fresh runs are already in sync (step-0 baseline + _next_eval_step=eval_steps).
         eval_synced = fresh_start
-        # JUMP-GRPO DAPO fill: with --algo.dynamic_filtering_fill_batch the generator
+        # GA-GRPO DAPO fill: with --algo.dynamic_filtering_fill_batch the generator
         # walks the epochs itself (see SamplesGenerator._advance_epoch) so a batch can
         # keep filling past an epoch boundary. The outer loop then runs once over the
         # whole remaining episode budget; checkpoints record the generator's epoch.
@@ -943,7 +943,7 @@ class GenerateSamplesActor:
                         if is_exhausted or budget_spent:
                             break
                         continue
-                    # JUMP-GRPO: count the accepted prompt groups in this batch toward the budget.
+                    # GA-GRPO: count the accepted prompt groups in this batch toward the budget.
                     total_trained_groups += len({_sample_group_key(s) for s in rollout_samples})
                     rollout_metrics["rollout/total_trained_groups"] = float(total_trained_groups)
                     # A fully exhausted dataloader means this episode is complete.
@@ -1240,7 +1240,7 @@ class RLTrainer:
         start_episode = checkpoint_states.get("episode", 0)
         global_step = checkpoint_states.get("global_step", 0)
         total_consumed_prompts = checkpoint_states.get("total_consumed_prompts", 0)
-        total_trained_groups = checkpoint_states.get("total_trained_groups", 0)  # JUMP-GRPO group budget
+        total_trained_groups = checkpoint_states.get("total_trained_groups", 0)  # GA-GRPO group budget
         if global_step > 0 or total_consumed_prompts > 0:
             ray.get(
                 [

@@ -211,7 +211,7 @@ def environment_pool(setup, first_port, count):
     def recycle():
         """Replace every server with a fresh process (same port and working dir). The official AppWorld
         serve app keeps host memory per episode it ran (5-12 MB; 256 servers held 576 GB after 72k
-        rollouts and the 1.7B Jump-GRPO seed-42 job was OOM-killed, 2026-10-10), so the pool is
+        rollouts and a 1.7B guide-assisted job was OOM-killed, 2026-10-10), so the pool is
         recycled between training segments, when no episode is in flight. APPWORLD_POOL_RECYCLE=0 keeps
         the servers for the whole run."""
         nonlocal supervisor
@@ -345,7 +345,7 @@ def _eval_job(setup, run, args, weights, split, decode, env, tag, gpu=None):
     with log.open('a') as stream:
         with _EVAL_START_LOCK:
             # Evaluation processes that start within the same second hang right after "Started a local Ray
-            # instance" (3 of 6 final-test decodes, 0.6B and 1.7B Jump-GRPO seed 42, 2026-10-10/11: each sat
+            # instance" (3 of 6 final-test decodes, 0.6B and 1.7B guide-assisted runs, 2026-10-10/11: each sat
             # idle for hours on its GPU). Each process starts its own Ray instance (RAY_ADDRESS=local) and
             # the simultaneous port probing is the only thing they share, so starts are spaced out.
             started = subprocess.Popen(cmd, cwd=setup/'runtime', env=eval_env, stdout=stream, stderr=subprocess.STDOUT)
