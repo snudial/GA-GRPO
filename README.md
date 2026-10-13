@@ -8,7 +8,7 @@ Anonymous code release for the submission. The implementation is called **GA-GRP
 
 **Handoff unit.** `Turn` places handoffs at BFCL user-turn boundaries. `Call` additionally permits validated boundaries between tool calls inside a user turn.
 
-**Initialization.** `Start` initializes at `h = 0`, with no replay. `End` initializes near the guide's end (exact positions in [Methods](#methods)). Both allow later movement in either direction.
+**Initialization.** `Start` initializes at `h = 0`, with no replay. `End` initializes near the end of the guide. Both allow later movement in either direction.
 
 **Movement.** Each group contains 16 continuations of the same task from the same handoff. After each group:
 
@@ -22,18 +22,18 @@ Anonymous code release for the submission. The implementation is called **GA-GRP
 
 Each method in the paper's tables is one `--method`. Its switches are in `config/methods.json`.
 
-| Paper | `--method` | Unit | Initial handoff | Movement | Tables |
-| --- | --- | --- | --- | --- | --- |
-| GRPO | `grpo` | none | none | none | 1, 3, 4 |
-| DAPO | `dapo` | none | none | none (dynamic sampling) | 1, 3 |
-| Turn-Threshold, Start | `turn-threshold-start` | Turn | Start: `h = 0` | Threshold | 1 |
-| Turn-Threshold, End | `turn-threshold-end` | Turn | End: `H − 1` | Threshold | 1, 2, 3 |
-| Turn-Bandit | `turn-bandit` | Turn | End: `H − 2` | Bandit | 2, 3 |
-| Call-Threshold | `call-threshold` | Call | End: `H − 2` | Threshold | 2, 3, 4 |
-| Call-Uniform | `call-uniform` | Call | End: `H − 2` | Uniform | 2, 3 |
-| Call-Bandit | `call-bandit` | Call | End: `H − 2` | Bandit | 2, 3 |
+| Paper | `--method` | Unit | Movement | Tables |
+| --- | --- | --- | --- | --- |
+| GRPO | `grpo` | none | none | 1, 3, 4 |
+| DAPO | `dapo` | none | none (dynamic sampling) | 1, 3 |
+| Turn-Threshold, Start | `turn-threshold-start` | Turn | Threshold | 1 |
+| Turn-Threshold, End | `turn-threshold-end` | Turn | Threshold | 1, 2, 3 |
+| Turn-Bandit | `turn-bandit` | Turn | Bandit | 2, 3 |
+| Call-Threshold | `call-threshold` | Call | Threshold | 2, 3, 4 |
+| Call-Uniform | `call-uniform` | Call | Uniform | 2, 3 |
+| Call-Bandit | `call-bandit` | Call | Bandit | 2, 3 |
 
-`H` is the number of user turns in the guide. At `H − 1` the learner takes over immediately before the guide's final user turn. At `H − 2` it takes over at the start of the second-to-last user turn, which is also a valid call-level position. These are the initial positions used by the paper's runs (`BFCL_CURRICULUM_INIT` = `suffix` or `second_last_turn`).
+All guided methods except Turn-Threshold, Start use End initialization.
 
 AppWorld (Table 4) uses `grpo` and `call-threshold`. AppWorld agents act by executing Python code blocks, and handoffs between code-execution boundaries are Call-level. `call-threshold` starts before the guide's last code block and moves one block per group with the same thresholds.
 
