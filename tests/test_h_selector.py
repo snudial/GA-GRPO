@@ -88,3 +88,136 @@ def _curriculum(monkeypatch, tmp_path, selector, window=4):
     monkeypatch.setenv("TRAIN_SEED", "42")
     import ga_grpo.curriculum as curriculum
     return importlib.reload(curriculum)
+
+
+def test_curriculum_window_rule_is_unchanged_by_default(monkeypatch, tmp_path):
+    monkeypatch.delenv("BFCL_H_SELECTOR", raising=False)
+    curriculum = _curriculum(monkeypatch, tmp_path, "window")
+    assert curriculum.current_h("t", h_init=3, H=5) == 3
+    for _ in range(4):
+        h = curriculum.record("t", True, H=5)
+    assert h == 2
+    event = json.loads((tmp_path / "curriculum.json.events.jsonl").read_text().splitlines()[-1])
+    assert event["selector"] == "window" and event["candidates"] is None
+
+
+def test_curriculum_bandit_records_positions_and_chooses_among_all_candidates(monkeypatch, tmp_path):
+    curriculum = _curriculum(monkeypatch, tmp_path, "bandit")
+    positions, turn_starts = curriculum.call_positions([["a"], ["b", "c"], ["d"]])   # 4 positions
+    assert curriculum.current_h("t", turn_starts[2], len(positions)) == 3
+    for _ in range(4):
+        h = curriculum.record("t", True, len(positions), turn_starts)   # all-pass at 3
+    assert 0 <= h < len(positions)
+    state = json.loads((tmp_path / "curriculum.json").read_text())["t"]
+    assert state["stats"]["3"] == [4.0, 0.0] and state["windows"] == 1 and state["n"] == 0
+    event = json.loads((tmp_path / "curriculum.json.events.jsonl").read_text().splitlines()[-1])
+    assert event["selector"] == "bandit" and set(event["candidates"]) == {"0", "1", "2", "3"}
+    assert event["candidates"]["3"]["q"] == pytest.approx(5 / 6)
+
+
+def test_curriculum_uniform_moves_without_a_step_rule(monkeypatch, tmp_path):
+    curriculum = _curriculum(monkeypatch, tmp_path, "uniform")
+    seen = set()
+    for window in range(12):
+        for _ in range(4):
+            h = curriculum.record("t", False, H=6)
+        seen.add(h)
+    assert len(seen) >= 3 and seen <= set(range(6))
+
+
+def _groups(monkeypatch, tmp_path, selector="bandit", window=4):
+    curriculum = _curriculum(monkeypatch, tmp_path, selector, window)
+    monkeypatch.setenv("EXP2_VERSION_FILE", str(tmp_path / "policy_version.txt"))
+    (tmp_path / "policy_version.txt").write_text("0")
+    return curriculum
+
+
+def _events(tmp_path):
+    return [json.loads(l) for l in (tmp_path / "curriculum.json.events.jsonl").read_text().splitlines()]
+
+
+def test_group_lease_fixes_h_for_every_rollout_and_opens_a_new_group_after_window(monkeypatch, tmp_path):
+    curriculum = _groups(monkeypatch, tmp_path)
+    leases = [curriculum.assign("t", 3, 5) for _ in range(4)]
+    assert {g for g, _ in leases} == {"t:1"} and {h for _, h in leases} == {3}
+    for i, (g, h) in enumerate(leases[:3]):
+        curriculum.record("t", True, 5, group_id=g, rollout_id=f"r{i}")
+    # a 5th rollout starts before the first group closed: it opens group 2 at the still-current h
+    g2, h2 = curriculum.assign("t", 3, 5)
+    assert g2 == "t:2" and h2 == 3
+    curriculum.record("t", True, 5, group_id="t:1", rollout_id="r3")   # closes group 1 (4/4)
+    ev = [e for e in _events(tmp_path) if e["status"] == "complete"]
+    assert len(ev) == 1 and ev[0]["group_id"] == "t:1" and ev[0]["success_rate"] == 1.0 and ev[0]["rollouts"] == 4
+    state = json.loads((tmp_path / "curriculum.json").read_text())["t"]
+    assert state["stats"]["3"] == [4.0, 0.0] and state["open"]["id"] == "t:2" and state["open"]["h"] == 3
+
+
+def test_duplicate_reports_count_once(monkeypatch, tmp_path):
+    curriculum = _groups(monkeypatch, tmp_path)
+    g, h = curriculum.assign("t", 2, 4)
+    for _ in range(3):
+        curriculum.assign("t", 2, 4)
+    for _ in range(3):
+        curriculum.record("t", True, 4, group_id=g, rollout_id="same")
+    assert not [e for e in _events(tmp_path) if e["status"] == "complete"]
+    assert sum(e["status"] == "duplicate" for e in _events(tmp_path)) == 2
+    for i in range(3):
+        curriculum.record("t", False, 4, group_id=g, rollout_id=f"r{i}")
+    done = [e for e in _events(tmp_path) if e["status"] == "complete"]
+    assert len(done) == 1 and done[0]["success_rate"] == 0.25
+
+
+def test_dropped_rollout_closes_the_group_as_incomplete_and_excluded(monkeypatch, tmp_path):
+    curriculum = _groups(monkeypatch, tmp_path)
+    g1 = [curriculum.assign("t", 3, 5) for _ in range(4)][0][0]
+    for i in range(3):   # the 4th rollout of group 1 is dropped by the runner and never reports
+        curriculum.record("t", True, 5, group_id=g1, rollout_id=f"a{i}")
+    for n, tag in ((2, "b"), (3, "c")):   # two later groups complete; group 1 can then not be waited for
+        g = [curriculum.assign("t", 3, 5) for _ in range(4)][0][0]
+        assert g == f"t:{n}"
+        for i in range(4):
+            curriculum.record("t", False, 5, group_id=g, rollout_id=f"{tag}{i}")
+        inc = [e for e in _events(tmp_path) if e["status"] == "incomplete"]
+        assert len(inc) == (0 if n == 2 else 1), (n, inc)
+    inc = [e for e in _events(tmp_path) if e["status"] == "incomplete"][0]
+    assert inc["group_id"] == "t:1" and inc["rollouts"] == 3 and inc["planned"] == 4 and inc["success_rate"] == 1.0
+    done = [e for e in _events(tmp_path) if e["status"] == "complete"]
+    assert [e["group_id"] for e in done] == ["t:2", "t:3"]
+    stats = json.loads((tmp_path / "curriculum.json").read_text())["t"]["stats"]
+    assert sum(a for a, b in stats.values()) == 0.0   # group 1's three successes never entered the records
+    assert sum(b for a, b in stats.values()) == pytest.approx(8.0)
+    assert json.loads((tmp_path / "curriculum.json").read_text())["t"]["pending"] == []
+
+
+def test_interleaved_completion_of_two_groups_closes_each_once(monkeypatch, tmp_path):
+    curriculum = _groups(monkeypatch, tmp_path)
+    g1 = [curriculum.assign("t", 3, 5) for _ in range(4)][0][0]
+    g2 = [curriculum.assign("t", 3, 5) for _ in range(4)][0][0]
+    order = [(g2, "b0", False), (g1, "a0", True), (g2, "b1", False), (g1, "a1", True),
+             (g1, "a2", True), (g2, "b2", False), (g2, "b3", False), (g1, "a3", True)]
+    for g, r, ok in order:
+        curriculum.record("t", ok, 5, group_id=g, rollout_id=r)
+    done = [e for e in _events(tmp_path) if e["status"] == "complete"]
+    assert [(e["group_id"], e["success_rate"]) for e in done] == [("t:2", 0.0), ("t:1", 1.0)]
+    assert not [e for e in _events(tmp_path) if e["status"] == "incomplete"]
+    stats = json.loads((tmp_path / "curriculum.json").read_text())["t"]["stats"]
+    assert stats["3"] == [4.0, 4.0]
+
+
+def test_records_fade_with_policy_updates_only(monkeypatch, tmp_path):
+    curriculum = _groups(monkeypatch, tmp_path)
+    monkeypatch.setenv("EXP2_BANDIT_DECAY", "0.5")
+    monkeypatch.setenv("EXP2_BANDIT_UPDATES_PER_EPOCH", "1")
+    def group(ok):
+        g = [curriculum.assign("t", 3, 5) for _ in range(4)][0][0]
+        for i in range(4):
+            curriculum.record("t", ok, 5, group_id=g, rollout_id=f"{g}-{i}")
+    successes = lambda: sum(a for a, b in json.loads((tmp_path / "curriculum.json").read_text())["t"]["stats"].values())
+    group(True)                                   # version 0: 4 successes recorded (at whatever h was chosen)
+    group(True)                                   # still version 0: no fade -> 8
+    assert successes() == pytest.approx(8.0)
+    (tmp_path / "policy_version.txt").write_text("2")
+    group(True)                                   # two updates: 0.5 ** 2 = 0.25 -> 8 * 0.25 + 4
+    st = json.loads((tmp_path / "curriculum.json").read_text())["t"]
+    assert successes() == pytest.approx(6.0) and st["stats_version"] == 2
+    assert [e["decay_factor"] for e in _events(tmp_path) if e["status"] == "complete"] == [1.0, 1.0, 0.25]

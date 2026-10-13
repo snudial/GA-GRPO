@@ -113,7 +113,7 @@ def prepare_group(label, group_id, n_samples):
         fcntl.flock(stream, fcntl.LOCK_EX)
         stream.seek(0)
         state = json.loads(stream.read() or '{}')
-        initial = 0 if os.environ['APPWORLD_METHOD'].startswith('need-based') else label.get('h_max', label['guide_H'] - 1)
+        initial = label.get('h_max', label['guide_H'] - 1)   # End initialization: the guide's last code block
         item = state.setdefault(label['task_id'], {'h': initial, 'groups': 0})
         label['h'] = item['h']
         stream.seek(0)

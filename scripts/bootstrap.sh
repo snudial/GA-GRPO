@@ -80,13 +80,14 @@ warn() { echo "[bootstrap] WARNING: $*" >&2; }
 free_gb() { df -Pk "$1" | awk 'NR==2 {print int($4 / 1048576)}'; }
 
 detect_topology() {   # config/topology/<name>.env for this node's GPUs, or "" if none fits
-  # H100 memory: 80 GB parts, and OSC Cardinal's 94 GB parts that report 95,830 MiB.
+  # H100 memory: 80 GB parts, and 94 GB parts that report 95,830 MiB.
   local names count mem
   names=$(nvidia-smi --query-gpu=name --format=csv,noheader | sort -u)
   count=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
   mem=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | sort -n | head -1)
   [ "$(printf '%s\n' "$names" | wc -l)" = 1 ] || { echo ""; return; }
   case "$names:$count" in
+    # 80 GB and 94 GB H100s share a profile; single_h100 reads the size off nvidia-smi.
     *H100*:4) if [ "$mem" -ge 79000 ] && [ "$mem" -lt 100000 ]; then echo multi_h100; return; fi ;;
     *H100*:1) if [ "$mem" -ge 79000 ] && [ "$mem" -lt 100000 ]; then echo single_h100; return; fi ;;
     *B200*:4) echo multi_gpu4; return ;;
@@ -202,10 +203,6 @@ stage_venv_molt() {
     "$UV" pip install --python "$py" --no-deps --no-build-isolation "$TE_TORCH_SPEC"
   # Ray workers import molt from the venv: point it at the patched submodule.
   "$UV" pip install --python "$py" --no-deps -e "$ROOT/third_party/molt"
-  # THD-shape guards in transformers/nemo_automodel qwen3_5: without them packed
-  # Qwen3.5 training runs the linear-attention recurrence across packed samples.
-  local guards="$ROOT/env/qwen3_5-thd-guards.patch"
-  patch -s -p1 -R --dry-run -d "$site" < "$guards" >/dev/null 2>&1 || patch -s -p1 -d "$site" < "$guards"
 }
 
 stage_venv_eval() {
@@ -319,7 +316,7 @@ PY
   cat <<EOF
 
 [bootstrap] done. Next:
-  python3 run.py --env bfcl --model Qwen3-4B-Instruct-2507 --method ga-grpo --seed 42 --dry-run
+  python3 run.py --env bfcl --model Qwen3-4B-Instruct-2507 --method call-bandit --seed 42 --dry-run
 EOF
 }
 

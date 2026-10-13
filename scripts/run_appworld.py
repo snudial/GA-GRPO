@@ -29,13 +29,13 @@ PYTHON = path('MOLT_VENV')/'bin/python'
 APPWORLD_PYTHON = path('APPWORLD_VENV')/'bin/python'
 MODELS = {'4b': 'Qwen3-4B-Instruct-2507', '8b': 'Qwen3-8B-NonThinking-AppendOnly',
           '1p7b': 'Qwen3-1.7B-NonThinking-AppendOnly', '0p6b': 'Qwen3-0.6B-NonThinking-AppendOnly'}  # knob suffixes 1P7B / 0P6B
-# Test decodes per (checkpoint, split), 8 since 2026-10-05 (was 3). Decode d keeps seed 20260826 + d, so
-# decodes 1-3 are the earlier protocol and their saved results are reused by identity. Measured on 9
-# fixed-env checkpoints: one test_normal decode has SD 0.020 (mean of 3: SE 0.012, of 8: 0.007);
-# test_challenge 0.011 (0.006 -> 0.004).
-# APPWORLD_TEST_DECODES=3 runs only the earlier protocol (saved-checkpoint curves).
-TEST_DECODES = int(os.environ.get('APPWORLD_TEST_DECODES', '8'))
-METHODS = ['grpo', 'dapo', 'ga-grpo', 'need-based-ga-grpo', 'ga-grpo-call-bandit', 'ga-grpo-call-uniform']
+# Test decodes per (checkpoint, split): 3, the paper's Avg@3 / Best@3 protocol. Decode d uses seed
+# 20260826 + d; a saved decode result is reused by identity. APPWORLD_TEST_DECODES raises the count.
+TEST_DECODES = int(os.environ.get('APPWORLD_TEST_DECODES', '3'))
+METHODS = ['grpo', 'call-threshold']
+# Guide-assisted AppWorld methods: handoffs between executed code blocks (Call-level in the paper),
+# initialized at the guide's last block and moved by the threshold rule (appworld_ga/curriculum.py).
+CURRICULUM_METHODS = {'call-threshold'}
 
 
 def pool_size():
@@ -65,7 +65,7 @@ def command(setup, run, model, method, seed, budget, *, evaluation=None, checkpo
         '--eval.dataset': setup/'datasets'/f'{evaluation or "dev"}.jsonl',
         # APPWORLD_EVAL_STEPS: in-training dev cadence (2026-10-12; a large value turns it off, e.g. when every
         # 10th step's weights are tested by separate 1-GPU jobs instead, slurm/test_every10_watch.sbatch).
-        '--eval.steps': int(os.environ.get('APPWORLD_EVAL_STEPS', 5 if method == 'need-based-ga-grpo' else 10)),
+        '--eval.steps': int(os.environ.get('APPWORLD_EVAL_STEPS', 10)),
         '--ckpt.output_dir': run/'hf', '--ckpt.path': run/'state',
     }
     if 'context_max_length' in config:
@@ -107,7 +107,7 @@ def command(setup, run, model, method, seed, budget, *, evaluation=None, checkpo
     else:
         if (run/'state/_actor').exists():
             args.append('--ckpt.load_enable')
-        if method in ('dapo', 'ga-dapo'):
+        if method == 'dapo':
             args.append('--algo.dynamic_filtering_fill_batch')
     # Attention, packing and prefix caching follow the model (ga_grpo/model_profile.py), as in BFCL.
     # Prefix caching on AppWorld 4B (2026-10-03, appworld_ab_20261003/r2_pc{0,1}, 96 groups each):
@@ -635,7 +635,7 @@ def main():
                    APPWORLD_METHOD=args.method, APPWORLD_SEED=str(args.seed),
                    APPWORLD_MAX_TURNS=str(config.get('max_turns', 30)), APPWORLD_MAX_PROMPT_GROUPS=str(args.budget//16),
                    APPWORLD_POOL=f'{args.first_port}-{args.first_port+args.pool_size-1}',
-                   APPWORLD_CURRICULUM='1' if 'ga-grpo' in args.method else '0',
+                   APPWORLD_CURRICULUM='1' if args.method in CURRICULUM_METHODS else '0',
                    EXP2_CURRICULUM_STATE=str(run/'curriculum.json'))
         # OPSD and other EXP2_ switches (config/methods.json via run.py) apply to
         # training only: evaluation must not allocate the EMA teacher.
@@ -716,7 +716,7 @@ def main():
                     check = {**state, 'rollout_generator_state_dict':
                              {**state['rollout_generator_state_dict'], 'round_exhausted': True}}
                     complete = validate_state(check, dataset_groups=90, target_groups=budget//16,
-                                              curriculum='ga-grpo' in args.method) == 'complete'
+                                              curriculum=args.method in CURRICULUM_METHODS) == 'complete'
                 if not complete:
                     cmd = command(setup, run, args.model, args.method, args.seed, budget,
                                   eval_batch=min(_split_size(setup, 'dev'), args.pool_size // 3),

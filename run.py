@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One entry point for every experiment: an env, a model, a method and a seed.
 
-    python3 run.py --env bfcl --model Qwen3-4B-Instruct-2507 --method ga-grpo --seed 42
+    python3 run.py --env bfcl --model Qwen3-4B-Instruct-2507 --method call-bandit --seed 42
     python3 run.py ... --dry-run      # print the training command; touch nothing
 
 Nothing else varies by hand: protocol (splits, budget, group, lengths) is
@@ -103,7 +103,7 @@ def bfcl(args, env, contract, ops):
                 sys.exit(f'SMOKE FAILED: see {ops/"smoke.log"}')
         manifest = json.loads((smoke_dir/'manifest.json').read_text())
         expected = dict(algo=spec['ALGO'], curriculum=spec['BFCL_CURRICULUM'], curriculum_init=init or 'suffix',
-                        handoff_unit=spec.get('BFCL_HANDOFF_UNIT', 'turn'))
+                        handoff_unit=spec.get('BFCL_HANDOFF_UNIT', 'turn'), h_selector=spec.get('BFCL_H_SELECTOR', 'window'))
         recorded = {k: str(manifest.get(k)) for k in expected}
         traces = list((smoke_dir/'rollout_trace').glob('*.jsonl'))
         if recorded != expected or not traces:
@@ -230,26 +230,13 @@ def main():
     if args.env == 'appworld':  # a resumed run keeps the setup it started with
         earlier = json.loads((ops/'request.json').read_text()) if (ops/'request.json').exists() else {}
         args.setup = args.setup or earlier.get('setup') or f"{contract['name']}_{args.model}_{commit[:12]}"
-    if not args.dry_run:
-        ops.mkdir(parents=True, exist_ok=True)
-        (ops/'request.json').write_text(json.dumps(dict(
+    ops.mkdir(parents=True, exist_ok=True)
+    (ops/'request.json').write_text(json.dumps(dict(
             env=args.env, model=args.model, method=args.method, seed=args.seed, topology=args.topology,
             run=args.run, switches=METHODS[args.method][args.env],
             setup=args.setup, commit=commit),
             indent=2) + '\n')
-    # This node's idle-GPU keeper (optional GPU_KEEPER_DIR in env.sh): reserve, then
-    # wait until no other job holds a GPU — later launches queue behind earlier ones.
-    keeper = host.get('GPU_KEEPER_DIR')
-    if keeper and not args.dry_run:
-        sys.path.insert(0, keeper)
-        import keeper_client
-        print(f'waiting for free GPUs (keeper {keeper})', flush=True)
-        keeper_client.wait_gpus_free(f'run_py_{args.run}')
-    try:
-        sys.exit((bfcl if args.env == 'bfcl' else appworld)(args, env, contract, ops))
-    finally:
-        if keeper and not args.dry_run:
-            keeper_client.release(f'run_py_{args.run}')
+    sys.exit((bfcl if args.env == 'bfcl' else appworld)(args, env, contract, ops))
 
 
 if __name__ == '__main__':

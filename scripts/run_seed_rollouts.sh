@@ -19,7 +19,7 @@ TARGET_EPISODES="${TARGET_EPISODES:-30 50}"
 case "$ALGO" in grpo|dapo) ;; *) echo "algo must be grpo or dapo" >&2; exit 2 ;; esac
 case "$MODE" in
   jump) RUN="${4:-bfcl_v3_jump_grpo_base100_4b_seed${SEED}_r80k_val25_test75_${TAG}}"
-        DATA="$ROOT/data/bfcl/bfcl_jumpstart_train.jsonl"; CURR=1; METHOD=ga-grpo ;;
+        DATA="$ROOT/data/bfcl/bfcl_jumpstart_train.jsonl"; CURR=1; METHOD=turn-threshold-end ;;
   grpo) RUN="${4:-bfcl_v3_${ALGO}_base100_4b_seed${SEED}_r80k_val25_test75_${TAG}}"
         DATA="$ROOT/data/bfcl/bfcl_train.jsonl"; CURR=0; METHOD="$ALGO" ;;
   *) echo "mode must be jump or grpo" >&2; exit 2 ;;
@@ -159,15 +159,21 @@ for target in $TARGET_EPISODES; do
   log "boundary_complete episode=$target sampled_groups=$sampled generated_rollouts=$expected_rollouts"
 done
 
-FINAL_HF="$RUN_DIR/hf_ep50"
+# "Final" is the last TARGET_EPISODES boundary. The contract's 50 keeps the
+# file names every earlier run used; an extension (TARGET_EPISODES="30 50 80"
+# with ALLOW_PROTOCOL_CHANGE) gets its own final log and test75 directory so
+# the 50-episode result is not reused or overwritten.
+FINAL_EP="${TARGET_EPISODES##* }"
+FINAL_ROLLOUTS=$((FINAL_EP * DATASET_GROUPS * N_SAMPLES))
+FINAL_HF="$RUN_DIR/hf_ep$FINAL_EP"
 test -s "$FINAL_HF/model.safetensors.index.json"
-FINAL_VAL_LOG="$RUN_DIR/logs/final_val25.log"
+if [ "$FINAL_EP" = 50 ]; then FINAL_VAL_LOG="$RUN_DIR/logs/final_val25.log"; else FINAL_VAL_LOG="$RUN_DIR/logs/final_val25_ep$FINAL_EP.log"; fi
 if ! grep -a -q "Eval-only completed:" "$FINAL_VAL_LOG" 2>/dev/null; then
   log "final_val_start split=val25 checkpoint=$FINAL_HF"
   EVAL_DATA="$VAL_DATA" bash "$ROOT/scripts/eval_monitor.sh" "$FINAL_HF" "$FINAL_VAL_LOG" >> "$LOG" 2>&1
 fi
 python3 "$ROOT/scripts/summarize_validation.py" "$RUN_DIR" \
-  --final-log "$FINAL_VAL_LOG" --n-samples "$N_SAMPLES" \
+  --final-log "$FINAL_VAL_LOG" --final-checkpoint "$FINAL_HF" --n-samples "$N_SAMPLES" \
   --output "$RUN_DIR/validation_summary.json" >> "$LOG"
 
 BEST_STEP=$(python3 -c "import json; print(json.load(open('$RUN_DIR/validation_summary.json'))['best']['optimizer_step'])")
@@ -175,7 +181,7 @@ BEST_HF=$(python3 -c "import json; print(json.load(open('$RUN_DIR/validation_sum
 test -s "$BEST_HF/model.safetensors.index.json" || { log "ERROR selected checkpoint missing path=$BEST_HF"; exit 1; }
 
 BEST_OUT="$RUN_ROOT/${RUN}_best_step${BEST_STEP}_${BFCL_PROFILE}_test75_3decode"
-FINAL_OUT="$RUN_ROOT/${RUN}_final_r80k_${BFCL_PROFILE}_test75_3decode"
+FINAL_OUT="$RUN_ROOT/${RUN}_final_r$((FINAL_ROLLOUTS / 1000))k_${BFCL_PROFILE}_test75_3decode"
 if [ "$BEST_HF" = "$FINAL_HF" ]; then FINAL_OUT="$BEST_OUT"; fi
 
 if [ ! -s "$BEST_OUT/summary.json" ]; then
@@ -183,12 +189,15 @@ if [ ! -s "$BEST_OUT/summary.json" ]; then
   TASK_MANIFEST="$TEST_MANIFEST" bash "$ROOT/scripts/eval_official.sh" "$BEST_HF" "$BEST_OUT" >> "$LOG" 2>&1
 fi
 if [ "$FINAL_OUT" != "$BEST_OUT" ] && [ ! -s "$FINAL_OUT/summary.json" ]; then
-  log "test75_start kind=final generated_rollouts=80000 checkpoint=$FINAL_HF"
+  log "test75_start kind=final generated_rollouts=$FINAL_ROLLOUTS checkpoint=$FINAL_HF"
   TASK_MANIFEST="$TEST_MANIFEST" bash "$ROOT/scripts/eval_official.sh" "$FINAL_HF" "$FINAL_OUT" >> "$LOG" 2>&1
 fi
 
+# The contract's result is comparison_result.json; an extension past 50 episodes
+# keeps its own file so the 80k comparison is never overwritten.
+if [ "$FINAL_EP" = 50 ]; then RESULT="$RUN_DIR/comparison_result.json"; else RESULT="$RUN_DIR/comparison_result_ep$FINAL_EP.json"; fi
 python3 "$ROOT/scripts/write_comparison_result.py" \
-  --run "$RUN_DIR" --method "$METHOD" --seed "$SEED" \
+  --run "$RUN_DIR" --method "$METHOD" --seed "$SEED" --expected-rollouts "$FINAL_ROLLOUTS" \
   --best-official "$BEST_OUT/summary.json" --final-official "$FINAL_OUT/summary.json" \
-  --output "$RUN_DIR/comparison_result.json" >> "$LOG"
-log "SUMMARY_COMPLETE method=$METHOD seed=$SEED result=$RUN_DIR/comparison_result.json"
+  --output "$RESULT" >> "$LOG"
+log "SUMMARY_COMPLETE method=$METHOD seed=$SEED result=$RESULT"

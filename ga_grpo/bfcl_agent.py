@@ -13,8 +13,7 @@ if AGENT_DIR not in sys.path:
 
 from openai import AsyncOpenAI
 
-# The repository root holds the `bfcl_env` environment layer (the former
-# shbae/OPSD-BASE tree); BFCL_SOURCE_ROOT is the pinned BFCL checkout. Both are
+# The repository root holds the `bfcl_env` environment layer; BFCL_SOURCE_ROOT is the pinned BFCL checkout. Both are
 # exported by scripts/train.sh from config/env.sh.
 REPO_ROOT = os.environ.get("BFCL_OPSD_ROOT", os.path.dirname(AGENT_DIR))
 BFCL_SOURCE = os.environ.get("BFCL_SOURCE_ROOT") or os.environ.get("BFCL_RUNTIME_SOURCE_ROOT")
@@ -29,7 +28,7 @@ from bfcl_env.runtime import BFCLRuntime  # noqa: E402
 from bfcl_env.rollout_protocol import StructuredAction  # noqa: E402
 from molt.agents import ChatAgent, ChatAgentRunner, Result  # noqa: E402
 
-from curriculum import call_positions, current_h, initial_h, record  # noqa: E402
+from curriculum import assign, call_positions, current_h, initial_h, record  # noqa: E402
 import banks  # noqa: E402
 from dapo import overlong_reward  # noqa: E402
 from bfcl_guide import _call_payload, _guide_action  # noqa: E402,F401
@@ -61,10 +60,14 @@ class BFCLAgent(ChatAgent):
         reference_turns = reset.metadata["ground_truth_tool_calls_by_turn"]
         # "call": the handoff may fall inside a user turn (see curriculum.call_positions).
         call_unit = os.environ.get("BFCL_HANDOFF_UNIT", "turn") == "call"
+        # The curriculum leases this rollout a slot in its task's current group: the group's
+        # id and its fixed h (curriculum.assign), so the 16 rollouts of a group share one h and
+        # the outcome is credited to that group, not to whatever h the state holds later.
+        group_id = None
         if call_unit:
             positions, turn_starts = call_positions(reference_turns)
             if curriculum_enabled:
-                position = current_h(label["task_id"], turn_starts[h_init], len(positions))
+                group_id, position = assign(label["task_id"], turn_starts[h_init], len(positions))
             elif "guide_position" in label:
                 position = int(label["guide_position"])
             else:
@@ -74,12 +77,10 @@ class BFCLAgent(ChatAgent):
         else:
             positions = turn_starts = None
             position = guide_calls = 0
-            guide_turns = (
-                current_h(label["task_id"], h_init, num_turns)
-                if curriculum_enabled
-                else h_init if requested_guide_turns < 0
-                else min(requested_guide_turns, num_turns)
-            )
+            if curriculum_enabled:
+                group_id, guide_turns = assign(label["task_id"], h_init, num_turns)
+            else:
+                guide_turns = h_init if requested_guide_turns < 0 else min(requested_guide_turns, num_turns)
         client = AsyncOpenAI(base_url=ctx.base_url, api_key=ctx.api_key)
         trace_started = datetime.now(timezone.utc).isoformat()
         trace_id = f"{os.getpid()}:{time.monotonic_ns()}"
@@ -93,13 +94,18 @@ class BFCLAgent(ChatAgent):
         last_evidence = {}
         cur_turn = guide_turns
 
-        def result(success, *, terminated, truncated=False, turn=-1):
+        handoff_prompt_chars = 0        # context handed to the student (system + guide roll-in), characters
+        handoff_prompt_tokens = None    # the same context as the server tokenized it (first student call)
+        last_finish_reason = None       # vLLM finish_reason of the student's last response
+
+        def result(success, *, terminated, truncated=False, turn=-1, reason=None):
             if not curriculum_enabled:
                 next_h = position if call_unit else guide_turns
             elif call_unit:
-                next_h = record(label["task_id"], success, len(positions), turn_starts)
+                next_h = record(label["task_id"], success, len(positions), turn_starts,
+                                group_id=group_id, rollout_id=trace_id)
             else:
-                next_h = record(label["task_id"], success, num_turns)
+                next_h = record(label["task_id"], success, num_turns, group_id=group_id, rollout_id=trace_id)
             h_used = position if call_unit else guide_turns
             trace_dir = os.environ.get("BFCL_TRACE_DIR")
             if os.environ.get("BFCL_TRACE_ROLLOUTS") == "1" and trace_dir:
@@ -111,13 +117,21 @@ class BFCLAgent(ChatAgent):
                 except (OSError, TypeError):
                     policy_version = None
                 with open(os.path.join(trace_dir, f"rollouts_{os.getpid()}.jsonl"), "a") as stream:
-                    stream.write(json.dumps(dict(trace_id=trace_id, task_id=label["task_id"],
+                    stream.write(json.dumps(dict(trace_id=trace_id, task_id=label["task_id"], group_id=group_id,
                         started_at=trace_started, completed_at=datetime.now(timezone.utc).isoformat(),
                         policy_version=policy_version, curriculum_enabled=curriculum_enabled,
                         h_used=h_used, h_next_at_completion=next_h, num_turns=num_turns,
                         handoff_unit="call" if call_unit else "turn", guide_turns=guide_turns,
                         guide_calls_in_turn=guide_calls,
                         success=bool(success), terminated=terminated, truncated=truncated,
+                        # Why the episode ended: the environment finished (terminated), the step cap
+                        # (max_steps), or a guide roll-in that ended it before the student acted (guide).
+                        # A context overflow surfaces as a server error, drops the rollout and never
+                        # reaches here (its group then closes as incomplete); last_finish_reason tells a
+                        # generation cut by max_tokens ("length") from a natural stop.
+                        termination=reason or ("terminated" if terminated else "max_steps"),
+                        last_finish_reason=last_finish_reason,
+                        handoff_prompt_chars=handoff_prompt_chars, handoff_prompt_tokens=handoff_prompt_tokens,
                         student_response_tokens=student_response_tokens, tool_steps=steps)) + "\n")
             penalty = 0.0
             if dapo_enabled:
@@ -197,7 +211,7 @@ class BFCLAgent(ChatAgent):
                     messages[0]["content"] = step.system_prompt_update
                 if step.terminated:
                     success = not reset.handle.official_stop_triggered
-                    return result(success, terminated=True, turn=step.turn)
+                    return result(success, terminated=True, turn=step.turn, reason="guide")
             if guide_calls:
                 # Mid-turn handoff: the first calls of this turn are context; the
                 # student continues the same turn (no END_TURN is sent).
@@ -209,6 +223,7 @@ class BFCLAgent(ChatAgent):
                 steps += 1
                 if step.terminated:
                     raise RuntimeError(f"Guide terminated inside turn {guide_turns}: {label['task_id']}")
+            handoff_prompt_chars = sum(len(str(m.get("content") or "")) for m in messages)
             while steps < reset.max_steps:
                 response = await client.chat.completions.create(
                     model=ctx.model_name,
@@ -222,6 +237,9 @@ class BFCLAgent(ChatAgent):
                         raise RuntimeError("DAPO requires completion_tokens from the rollout server")
                 else:
                     student_response_tokens += int(response.usage.completion_tokens)
+                    if handoff_prompt_tokens is None and response.usage.prompt_tokens is not None:
+                        handoff_prompt_tokens = int(response.usage.prompt_tokens)
+                last_finish_reason = getattr(response.choices[0], "finish_reason", None)
                 raw = response.choices[0].message.content or ""
                 if cur_turn not in turn_first:
                     turn_first[cur_turn] = (raw, [dict(m) for m in messages])
@@ -235,7 +253,7 @@ class BFCLAgent(ChatAgent):
                     return result(success, terminated=True, turn=step.turn)
                 messages.extend(step.observation_messages)
                 cur_turn = step.turn
-            return result(False, terminated=False, truncated=True)
+            return result(False, terminated=False, truncated=True, reason="max_steps")
         finally:
             runtime.close(reset.handle)
 

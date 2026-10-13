@@ -84,12 +84,29 @@ def main() -> None:
 
     final_step = max(step_budget)
     key, score = metric_value(final_metrics)
+    final_checkpoint = args.final_checkpoint or args.run / "hf_ep50"
+    final_budget = dict(step_budget[final_step])
+    # The optimizer log stops at the last update; an all-filtered tail (groups that were
+    # sampled but produced no mixed group) still consumes budget. The boundary marker is the
+    # committed counter (run_seed_rollouts verifies sampled_groups == expected_groups before
+    # writing it), so the final entry reports that when the final checkpoint is a boundary.
+    if match := re.search(r"hf_ep(\d+)$", str(final_checkpoint)):
+        marker = args.run / "boundaries" / f"ep{match.group(1)}.complete"
+        if marker.exists():
+            fields = dict(line.split("=", 1) for line in marker.read_text().split() if "=" in line)
+            if "prompt_groups" in fields and "generated_rollouts" in fields:
+                final_budget = {
+                    "prompt_groups": int(fields["prompt_groups"]),
+                    "generated_rollouts": int(fields["generated_rollouts"]),
+                    "last_update_prompt_groups": step_budget[final_step]["prompt_groups"],
+                    "budget_source": "boundary_marker",
+                }
     validations[final_step] = {
         "optimizer_step": final_step,
         "metric_key": key,
         "val_avg_at_3": score,
-        **step_budget[final_step],
-        "checkpoint": str(args.final_checkpoint or args.run / "hf_ep50"),
+        **final_budget,
+        "checkpoint": str(final_checkpoint),
         "source": "final_eval_only",
     }
     ordered = sorted(validations.values(), key=lambda row: int(row["optimizer_step"]))

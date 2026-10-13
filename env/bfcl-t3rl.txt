@@ -1,5 +1,5 @@
 # BFCL CLI venv for BFCL_PROFILE=author_lineage (BFCL_T3RL_VENV), python 3.12.3.
-# Exact package set of shbae/OPSD-BASE/.venv/bfcl-t3rl on the 4xB200 node, 2026-10-02 (`uv pip freeze`).
+# Exact package set of the BFCL (T3RL lineage) environment used for the experiments (`uv pip freeze`, 2026-10-02).
 # Installed with `uv pip install --no-deps -r` by scripts/bootstrap.sh, so nothing is re-resolved.
 # bfcl_eval itself is an editable install of the pinned gorilla checkout (6ea5797), done by bootstrap.sh.
 aiohappyeyeballs==2.7.1

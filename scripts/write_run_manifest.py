@@ -60,6 +60,8 @@ def main() -> None:
         "curriculum": os.environ.get("BFCL_CURRICULUM"),
         "curriculum_init": os.environ.get("BFCL_CURRICULUM_INIT", "suffix"),
         "handoff_unit": os.environ.get("BFCL_HANDOFF_UNIT", "turn"),
+        # window (fixed-step rule) | uniform | bandit (ga_grpo/h_selector.py)
+        "h_selector": os.environ.get("BFCL_H_SELECTOR", "window"),
         # run.py method name and the OPSD switches, which change no Molt flag.
         "method": os.environ.get("COMPARISON_METHOD"),
         "opsd": os.environ.get("OPSD", "0"),
@@ -82,6 +84,11 @@ def main() -> None:
         "vllm_gpu_memory_utilization": os.environ.get("VLLM_UTIL"),
         "vllm_max_num_batched_tokens": os.environ.get("VLLM_MAX_BATCHED_TOKENS") or None,
         "vllm_prefix_caching": os.environ.get("VLLM_PREFIX_CACHING", "0"),
+        # Adam placement (topology profile by model size, or explicit).
+        "fsdp_offload": os.environ.get("FSDP_OFFLOAD"),
+        "rollout_runners": os.environ.get("NUM_RUNNERS"),
+        # 0 = one sample per training forward; N = packed up to N tokens.
+        "train_max_tokens": os.environ.get("TRAIN_MAX_TOKENS"),
         "command": args.command,
     }
     if os.environ.get("TRAIN_DATA"):

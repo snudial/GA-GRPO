@@ -98,6 +98,44 @@ class CpuOptimizerOffloader:
                 set_local_shard(p, gpu_shard)  # restore the GPU shard for the next forward
 
     @torch.no_grad()
+    def init_state_on_cpu(self, optimizer: optim.Optimizer, params: list) -> None:
+        """Materialize the Adam state on CPU before a DCP optimizer load.
+
+        DCP's ``get_optimizer_state_dict`` initializes an empty optimizer with a zero-grad,
+        zero-lr ``step()`` (``_init_optim_state``) on the params as they are, GPU-resident,
+        so the fp32 moments land on GPU: 2x the param shards (32 GB for a 4B), the very
+        allocation this offload exists to avoid. With vLLM resident on the same GPU a 4B
+        resume OOMs right there, before ``moments_to_cpu`` could run. Do the same dummy
+        step through the CPU path instead: swap each param to its fp32 CPU master, give it
+        a zero grad (allocated on CPU, since the param's local shard is on CPU now), run
+        ``step()`` at lr 0 so the moments are created on CPU exactly as a training step
+        creates them, then restore the GPU shards. ``_init_optim_state`` then finds a
+        populated ``optimizer.state`` and skips. No-op when the optimizer has state already.
+        """
+        if optimizer.state:
+            return
+        gpu_shards = []
+        for p in params:
+            key = id(p)
+            if key not in self._cpu_master:
+                self._cpu_master[key] = local_shard(p).detach().to("cpu", torch.float32)
+                self._cpu_grad[key] = torch.empty_like(self._cpu_master[key])
+            gpu_shards.append((p, local_shard(p)))
+            set_local_shard(p, self._cpu_master[key])
+            p.grad = torch.zeros_like(p)
+        lrs = [group["lr"] for group in optimizer.param_groups]
+        for group in optimizer.param_groups:
+            group["lr"] = torch.tensor(0.0) if isinstance(group["lr"], torch.Tensor) else 0.0
+        try:
+            optimizer.step()  # lr 0, zero grads: creates the CPU moments, leaves the masters as they are
+        finally:
+            for group, lr in zip(optimizer.param_groups, lrs):
+                group["lr"] = lr
+            for p, gpu_shard in gpu_shards:
+                p.grad = None
+                set_local_shard(p, gpu_shard)
+
+    @torch.no_grad()
     def moments_to_cpu(self, optimizer: optim.Optimizer) -> None:
         """Page the Adam moments to CPU after a checkpoint resume. DCP's
         set_optimizer_state_dict restores them onto the model param's (GPU) device, but the

@@ -12,9 +12,9 @@ def state(consumed=3000, episode=30):
                     pending_finished_samples=0, round_exhausted=True, curriculum_state={}))
 
 
-@pytest.mark.parametrize("method", ["grpo", "ga-grpo", "dapo"])
+@pytest.mark.parametrize("method", ["grpo", "turn-threshold-end", "dapo"])
 def test_segment_resume_complete_and_extension(method):
-    kw = dict(dataset_groups=100, curriculum=method == "ga-grpo")
+    kw = dict(dataset_groups=100, curriculum=method == "turn-threshold-end")
     assert validate_state(state(), target_groups=5000, **kw) == "resume"
     assert validate_state(state(5000, 50), target_groups=5000, **kw) == "complete"
     assert validate_state(state(5000, 50), target_groups=6000, **kw) == "resume"

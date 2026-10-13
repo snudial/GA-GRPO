@@ -28,18 +28,36 @@ if [[ -n "$BFCL_SOURCE_ROOT" ]]; then
 fi
 RUN_ID="${RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
 RUN_DIR="${RUN_DIR:-$ROOT/outputs/bfcl_official_${CATEGORY}_${RUN_ID}}"
-DECODES="${DECODES:-8}"  # 8 since 2026-10-05; decode d keeps seed SEED_BASE + d
+DECODES="${DECODES:-3}"  # Avg@3 / Best@3; decode d uses seed SEED_BASE + d
 TEMPERATURE="${TEMPERATURE:-0.000001}"
 SEED_BASE="${SEED_BASE:-20260826}"
 PORT_BASE="${PORT_BASE:-18001}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 GPU_SAMPLE_SECONDS="${GPU_SAMPLE_SECONDS:-10}"
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-262144}"
+# vLLM context: the 4B-2507's 262144 was fixed here; a model with a shorter
+# max_position_embeddings (Qwen3-0.6B/1.7B: 40960) refuses to serve above it,
+# so the ceiling is the smaller of the two unless MAX_MODEL_LEN is set.
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-$(python3 - "$MODEL_PATH" <<'PY2'
+import json, sys
+cfg = json.load(open(sys.argv[1] + "/config.json"))
+text = cfg.get("text_config", cfg)
+print(min(262144, int(text.get("max_position_embeddings") or 262144)))
+PY2
+)}"
 BFCL_MAX_OUTPUT_TOKENS="${BFCL_MAX_OUTPUT_TOKENS:-4096}"
 # vLLM serving venv for the evaluation servers (config/env.sh: BFCL_VLLM_VENV).
 BFCL_VLLM_VENV="${BFCL_VLLM_VENV:-$ROOT/.venv/vllm-b200}"
 VLLM_BIN="${VLLM_BIN:-$BFCL_VLLM_VENV/bin/vllm}"
 VLLM_PYTHON="${VLLM_PYTHON:-$BFCL_VLLM_VENV/bin/python}"
+# The serving venv's pip CUDA 13 toolkit: FlashInfer JIT-compiles its sampling
+# kernels and needs curand.h, which a node's /usr/local/cuda may lack
+# ("fatal error: curand.h: No such file"). The sampler is
+# off by default (temperature 1e-6 decodes are argmax either way; vLLM's torch
+# sampler then serves), and the venv's headers/nvcc are offered for any other JIT.
+_vllm_site="$("$VLLM_PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null || true)"
+VLLM_CPATH="$(ls -d "$_vllm_site"/nvidia/*/include 2>/dev/null | paste -sd: -)"
+VLLM_CUDA_HOME="${VLLM_CUDA_HOME:-}"
+[[ -n "$VLLM_CUDA_HOME" || ! -x "$_vllm_site/nvidia/cu13/bin/nvcc" ]] || VLLM_CUDA_HOME="$_vllm_site/nvidia/cu13"
 GPU_IDS="${GPU_IDS:-0,1,2,3}"
 IFS=',' read -r -a GPU_ARRAY <<< "$GPU_IDS"
 NGPU=${#GPU_ARRAY[@]}
@@ -114,6 +132,8 @@ start_servers() {
         physical_gpu=${GPU_ARRAY[$local_gpu]}
         port=$((PORT_BASE + local_gpu))
         CUDA_VISIBLE_DEVICES="$physical_gpu" OMP_NUM_THREADS=1 VLLM_LOGGING_LEVEL=INFO \
+            env VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}" \
+            CPATH="$VLLM_CPATH${CPATH:+:$CPATH}" ${VLLM_CUDA_HOME:+CUDA_HOME="$VLLM_CUDA_HOME"} \
             "$VLLM_BIN" serve "$MODEL_PATH" \
             --host 127.0.0.1 --port "$port" --dtype bfloat16 \
             --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
@@ -159,8 +179,30 @@ score_shard() {
         --comparability "$COMPARABILITY"
 }
 
+decode_generated() {   # DECODE: generation finished earlier and every shard has its results
+    local decode=$1 shard_index
+    grep -q ",decode_$decode,generation_end$" "$RUN_DIR/events.csv" 2>/dev/null || return 1
+    for ((shard_index=0; shard_index<TOTAL_SHARDS; shard_index++)); do
+        ls "$RUN_DIR/decode_$decode/shard_$shard_index/official_result"/*/*.json >/dev/null 2>&1 || return 1
+    done
+}
+
 for ((decode=0; decode<DECODES; decode++)); do
     split_decode_ids "$decode"
+    # Resume: a decode whose generation completed in an earlier (walltime-killed)
+    # run keeps its outputs and is only re-scored (CPU, cheap); an incomplete
+    # one is regenerated whole (bfcl generate --allow-overwrite).
+    if decode_generated "$decode"; then
+        echo "$(date --iso-8601=seconds),decode_$decode,generation_reused" >> "$RUN_DIR/events.csv"
+        for ((shard_index=0; shard_index<TOTAL_SHARDS; shard_index++)); do
+            local_gpu=$((shard_index % NGPU))
+            physical_gpu=${GPU_ARRAY[$local_gpu]}
+            score_shard "$decode" "$shard_index" "$physical_gpu" "$local_gpu" \
+                > "$RUN_DIR/logs/decode_${decode}_score_gpu_${physical_gpu}_shard_${shard_index}.log" 2>&1 &
+            SCORE_PIDS+=("$!")
+        done
+        continue
+    fi
     start_servers "$decode"
     echo "$(date --iso-8601=seconds),decode_$decode,generation_start" >> "$RUN_DIR/events.csv"
     CLI_PIDS=()

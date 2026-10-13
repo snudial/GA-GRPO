@@ -1,4 +1,4 @@
-"""Join and check an AppWorld training ledger (appworld_ga/ledger.py; docs/APPWORLD_TRAINING_LEDGER_KO.md).
+"""Join and check an AppWorld training ledger (appworld_ga/ledger.py).
 
     python scripts/appworld_ledger.py RUN [--write]
 

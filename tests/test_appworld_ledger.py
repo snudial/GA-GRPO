@@ -25,14 +25,14 @@ def result(reward):
                                                        'ledger_turns': [{'turn': 0, 'code': 'print(1)'}]})
 
 
-@pytest.mark.parametrize('method', ['grpo', 'ga-grpo'])
+@pytest.mark.parametrize('method', ['grpo', 'call-threshold'])
 def test_group_row_links_the_trainer_rollout_ids(monkeypatch, tmp_path, method):
     ledger = tmp_path/'run'/'ledger'
     monkeypatch.setenv('APPWORLD_LEDGER_DIR', str(ledger))
     monkeypatch.setenv('APPWORLD_SEGMENT_ID', 'seg-a')
     monkeypatch.setenv('APPWORLD_SEED', '43')
     monkeypatch.setenv('APPWORLD_METHOD', method)
-    monkeypatch.setenv('APPWORLD_CURRICULUM', '1' if 'ga-grpo' in method else '0')
+    monkeypatch.setenv('APPWORLD_CURRICULUM', '1' if method == 'call-threshold' else '0')
     monkeypatch.setenv('EXP2_CURRICULUM_STATE', str(tmp_path/'state.json'))
     monkeypatch.setenv('EXP2_VERSION_FILE', str(tmp_path/'version.txt'))
     (tmp_path/'version.txt').write_text('7')
