@@ -1,0 +1,103 @@
+{
+  "env": "appworld",
+  "name": "appworld_react30_c20480_r129600",
+  "source": "appworld_react30_c20480_r86400_20260916_v10_execcompat_seed43 setup.json + the later server crash fix (appworld_ga/operation_diagnostics.py); budget extended 86400 -> 129600 (three more 14400 milestones) on 2026-10-09 to continue the seed-43 8B runs",
+  "splits": {
+    "train": 90,
+    "dev": 57,
+    "test_normal": 168,
+    "test_challenge": 417
+  },
+  "group_size": 16,
+  "total_generated_rollouts": 129600,
+  "max_len": 20480,
+  "max_turns": 30,
+  "prompt_profile": "rllm_react_corrected",
+  "message_pattern": {
+    "observation_role": "user",
+    "new_query_role": "user",
+    "queries_per_episode": 1
+  },
+  "curriculum": {
+    "initial_h": {
+      "grpo": 0,
+      "ga-grpo": "h_max",
+      "need-based-ga-grpo": 0
+    },
+    "promote_at": 0.7,
+    "demote_at": 0.1,
+    "evaluation_h": 0
+  },
+  "reward": "strict terminal binary; no overlong shaping",
+  "eval": {
+    "selection": "dev avg@3 during training (in_training_dev_interval steps) and at the final checkpoint; earliest step on ties",
+    "test": "test_normal and test_challenge, 8 decodes (decode d: seed 20260826+d), h=0, on the final checkpoint and the dev-selected one only"
+  },
+  "setup_fields": {
+    "milestones": [
+      14400,
+      28800,
+      43200,
+      57600,
+      72000,
+      86400,
+      100800,
+      115200,
+      129600
+    ],
+    "observation_max_chars": 0,
+    "server_entrypoint": "appworld_ga.server:app",
+    "environment_revision": "appworld_fts_cell_deadline_20260916_v1",
+    "gpu_optimizations": {
+      "4b": {
+        "MOLT_GLOO_REUSE_BUFFER": "1",
+        "MOLT_REUSE_ACTOR_CACHE": "1"
+      },
+      "8b": {
+        "MOLT_GLOO_REUSE_BUFFER": "0",
+        "MOLT_REUSE_ACTOR_CACHE": "0"
+      }
+    },
+    "in_training_dev_interval": {
+      "grpo": 10,
+      "ga-grpo": 10,
+      "need-based-ga-grpo": 5
+    },
+    "authorized_h_caps": {
+      "2a163ab_3": 13,
+      "22cc237_1": 27
+    },
+    "full_prefix_required": false,
+    "require_gpu_validation": false,
+    "budget_definition": "90 train tasks * 16 trajectories * 90 data epochs; includes all filtered groups; excludes evaluation",
+    "actor_partial_batch": "flush tail with actual global student-token denominator",
+    "update_units": "collector cycle: up to 32 groups; Adam step: up to 32 trajectory samples; log both",
+    "checkpoint_policy": "save due every 5 cycles; defer until pending pools are empty, latest 1 retained",
+    "reliable_rpc": {
+      "protocol": 1,
+      "client_keepalive_connections": 0,
+      "client_trust_env": false,
+      "server_keepalive_seconds": 30,
+      "attempts": 4,
+      "backoff_seconds": 0.25,
+      "server_crash_policy": "fail closed; never replay uncertain state"
+    },
+    "methods": [
+      "grpo",
+      "dapo",
+      "ga-grpo",
+      "need-based-ga-grpo",
+      "ga-grpo-call-bandit",
+      "ga-grpo-call-uniform"
+    ],
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "models": [
+      "4b",
+      "8b"
+    ]
+  }
+}

@@ -1,0 +1,2 @@
+Source: https://github.com/rllm-org/rllm/blob/960d573e4d49cbabf846fa18448120e6863ebfdf/rllm/agents/appworld_react_agents.py (v0.2.1), REACT_PROMPT, Apache-2.0.
+Adapted 2026-09-12: fixed boolean-list password lookup, defined spotify_access_token from login_result, removed arbitrary 10-page example cutoff. The demonstration is prompt text only and is never executed against the target world. No claim that this is the unreleased Skill-SD implementation.

@@ -1,0 +1,122 @@
+--- a/transformers/models/qwen3_5/modeling_qwen3_5.py
++++ b/transformers/models/qwen3_5/modeling_qwen3_5.py
+@@ -149,6 +149,14 @@
+     def forward(self, x, position_ids):
+         # In contrast to other models, Qwen3_5 has different position ids for the grids
+         # So we expand the inv_freq to shape (3, ...)
++        # mckim/exp2 patch: sequence-packed (THD) training passes ONE flat row of
++        # positions with resets at sample boundaries — promote it to (1, total)
++        # so the text-only expand below applies, and squeeze the placeholder
++        # batch dim back out of cos/sin so downstream THD q/k/v stay 3D.
++        # Text-only mRoPE uses identical positions on all three grids.
++        _mckim_flat_thd = position_ids.ndim == 1
++        if _mckim_flat_thd:
++            position_ids = position_ids[None, :]
+         if position_ids.ndim == 2:
+             position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
+         inv_freq_expanded = (
+@@ -164,6 +172,8 @@
+             cos = emb.cos() * self.attention_scaling
+             sin = emb.sin() * self.attention_scaling
+ 
++        if _mckim_flat_thd:
++            cos, sin = cos.squeeze(0), sin.squeeze(0)
+         return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
+ 
+     def apply_interleaved_mrope(self, freqs, mrope_section):
+--- a/nemo_automodel/components/models/qwen3_5/model.py
++++ b/nemo_automodel/components/models/qwen3_5/model.py
+@@ -375,6 +375,12 @@
+             cu_seqlens = cu_seqlens_t.to(torch.long)
+             indices = indices_t
+             linear_attn_mask = packing_mask
++        elif attn_kwargs.get("cu_seqlens") is not None:
++            # mckim/exp2 patch: on the THD path squeeze_input_for_thd dropped
++            # attention_mask, so the packed sample boundaries only survive in
++            # attn_kwargs. Without this the recurrence would run straight
++            # across sample boundaries — silently wrong, not a crash.
++            cu_seqlens = attn_kwargs["cu_seqlens"].to(torch.long)
+ 
+         if linear_attn_mask is not None and padding_mask is None:
+             padding_mask = linear_attn_mask.bool().logical_not()
+@@ -1349,6 +1355,11 @@
+         )
+ 
+         hidden_states = outputs.last_hidden_state
++        # mckim/exp2 patch: THD path returns a flat [total, hidden] stream —
++        # restore the placeholder batch dim for the head slicing (see the
++        # matching guard in the conditional-generation forward below).
++        if hidden_states.dim() == 2:
++            hidden_states = hidden_states.unsqueeze(0)
+         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+         logits = self.lm_head(hidden_states[:, slice_indices, :])
+ 
+--- a/nemo_automodel/components/models/qwen3_5_moe/cp_linear_attn.py
++++ b/nemo_automodel/components/models/qwen3_5_moe/cp_linear_attn.py
+@@ -157,6 +157,14 @@
+         """
+         from transformers.models.qwen3_5.modeling_qwen3_5 import apply_mask_to_padding_states
+ 
++        # mckim/exp2 patch: THD-squeezed callers (squeeze_input_for_thd) hand a
++        # flat [total, hidden] stream; run the packed branch below on the
++        # [1, total, hidden] layout (cu_seqlens carries the boundaries) and
++        # flatten the output again so the residual stream keeps its THD shape.
++        _mckim_flat_thd = hidden_states.dim() == 2
++        if _mckim_flat_thd:
++            hidden_states = hidden_states.unsqueeze(0)
++
+         batch_size, seq_len, hidden_dim = hidden_states.shape
+ 
+         use_precomputed_states = (
+@@ -222,8 +230,17 @@
+                     seq_idx_for_conv = None
+                 elif needs_unpad:
+                     seq_idx_for_conv = attention_mask.reshape(-1)[indices].unsqueeze(0).to(torch.int32).contiguous()
+-                else:
++                elif attention_mask is not None:
+                     seq_idx_for_conv = attention_mask.to(torch.int32).contiguous()
++                else:
++                    # mckim/exp2 patch: THD path — the mask was dropped by
++                    # squeeze_input_for_thd; rebuild per-token segment ids
++                    # from cu_seqlens so the varlen conv respects boundaries.
++                    _seg = torch.arange(
++                        cu_seqlens.numel() - 1,
++                        device=mixed_qkv.device, dtype=torch.int32)
++                    seq_idx_for_conv = torch.repeat_interleave(
++                        _seg, cu_seqlens.diff()).unsqueeze(0).contiguous()
+                 mixed_qkv = self.causal_conv1d_fn(
+                     x=mixed_qkv,
+                     weight=self.conv1d.weight.squeeze(1),
+@@ -231,6 +248,20 @@
+                     activation=self.activation,
+                     seq_idx=seq_idx_for_conv,
+                 )
++            elif is_packed and not needs_unpad and cu_seqlens is not None:
++                # mckim/exp2 patch: without the fused varlen kernel the plain
++                # depthwise conv would run straight across packed sample
++                # boundaries — the first (kernel-1) tokens of every segment
++                # would see the previous sample's tail, and that contamination
++                # then rides the recurrent state through the WHOLE segment
++                # (measured: |dlogprob| up to 6.2 on post-boundary samples).
++                # Convolve each segment independently instead.
++                _cu = cu_seqlens.tolist()
++                _parts = []
++                for _i in range(len(_cu) - 1):
++                    _seg = mixed_qkv[:, :, _cu[_i]:_cu[_i + 1]]
++                    _parts.append(F.silu(self.conv1d(_seg)[:, :, : _seg.shape[-1]]))
++                mixed_qkv = torch.cat(_parts, dim=-1)
+             else:
+                 mixed_qkv = F.silu(self.conv1d(mixed_qkv)[:, :, :eff_seq_len])
+ 
+@@ -315,6 +346,11 @@
+             padded.index_copy_(0, indices, output)
+             output = padded.reshape(batch_size, seq_len, -1)
+ 
++        # mckim/exp2 patch: mirror the entry promotion — flat-THD callers get a
++        # flat [total, hidden] result back so the residual stream keeps rank 2.
++        if _mckim_flat_thd and output.dim() == 3:
++            output = output.squeeze(0)
++
+         return output
+ 
+     def forward(

@@ -1,0 +1,15 @@
+{
+  "env": "bfcl",
+  "name": "bfcl_v3_author_lineage_r80k",
+  "source": "config/bfcl_protocol.sh (BFCL_PROFILE=author_lineage), scripts/run_seed_rollouts.sh",
+  "splits": {"train": 100, "val": 25, "test": 75,
+             "ood_test": {"multi_turn_miss_func": 75, "multi_turn_miss_param": 75, "multi_turn_long_context": 75}},
+  "group_size": 16,
+  "total_generated_rollouts": 80000,
+  "max_len": 10000,
+  "max_new_tokens": 4096,
+  "message_pattern": {"observation_role": "tool", "new_query_role": "user", "queries_per_episode": 2},
+  "curriculum": {"promote_at": 0.7, "demote_at": 0.1, "window": 16, "step": "±1 per window; call unit: all-pass drops to the previous turn boundary"},
+  "reward": "strict official session success",
+  "eval": {"selection": "in-training val25 avg@3 every 10 steps", "test": "official harness test75, 8 decodes, temperature 1e-6"}
+}

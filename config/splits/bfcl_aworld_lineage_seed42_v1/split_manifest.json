@@ -1,0 +1,104 @@
+{
+  "algorithm": "random.Random(42).shuffle(list(range(200))); first 100 train, next 25 val, final 75 test; evaluation is val union test",
+  "claim_boundary": "Public split from overlapping-author AWorld/EnvTuning/T3RL lineage; not yet direct evidence that CrEST used this exact split.",
+  "comparability": "author-lineage-candidate",
+  "known_version_delta": {
+    "multi_turn_base_154": "belongs to eval; malformed in pinned BFCL v1.3 but corrected in the newer BFCL lineage used by T3RL"
+  },
+  "manifests": {
+    "base_eval": {
+      "count": 100,
+      "file": "base_eval.json",
+      "sha256": "d254405994f4675f378d1f33af6052878203b82eb38dbfbad65a87f5c18fb01e"
+    },
+    "base_test75": {
+      "count": 75,
+      "file": "base_test75.json",
+      "sha256": "d3e2410b6c882a9fa7163bb23fa8969a5bf68a60932182f70d5adadf2944e026"
+    },
+    "base_train": {
+      "count": 100,
+      "file": "base_train.json",
+      "sha256": "d05f5cc1ab464acff2025efaa25b39480077cb2614c1ef3df16160c946177515"
+    },
+    "base_val": {
+      "count": 25,
+      "file": "base_val.json",
+      "sha256": "ebb23f0e6a3b7bdef4461a00a3668ab66e46132422893de90e04484685a74b35"
+    },
+    "long_context_eval": {
+      "count": 100,
+      "file": "long_context_eval.json",
+      "sha256": "837e10409d793d8c8cb00c66dbb136213303c742330cf6717705980ad8b491ac"
+    },
+    "long_context_test75": {
+      "count": 75,
+      "file": "long_context_test75.json",
+      "sha256": "69663a55c4f085960af24a9fbafb6eb4911cc55f591babb28254c21d10343238"
+    },
+    "long_context_train": {
+      "count": 100,
+      "file": "long_context_train.json",
+      "sha256": "e8e375a88891364936fc327b8d3ac2d1f1773811123bbd6b2538d28e91e88c5b"
+    },
+    "long_context_val": {
+      "count": 25,
+      "file": "long_context_val.json",
+      "sha256": "815d8e23d45846d668252d37068a031442593895f2e3ea866d0640de60de561a"
+    },
+    "miss_func_eval": {
+      "count": 100,
+      "file": "miss_func_eval.json",
+      "sha256": "bbdb6cf11de0faf1bdd157b96502e830d4bd4c94385c3d4ce6bfb893b14efcf9"
+    },
+    "miss_func_test75": {
+      "count": 75,
+      "file": "miss_func_test75.json",
+      "sha256": "ff7c7cd687d5e8baac382e9563503fc9e5fe1cf4a4210b1edf392baaa3bccf10"
+    },
+    "miss_func_train": {
+      "count": 100,
+      "file": "miss_func_train.json",
+      "sha256": "90d96e3f1049b4b991e04fc6ede309c5435fd709a19a432edd79311ffc9da788"
+    },
+    "miss_func_val": {
+      "count": 25,
+      "file": "miss_func_val.json",
+      "sha256": "0f6f796d1bf6c040fc0efcde1ecd5edfef21b4480c3a1f358e9ed2648e4a4199"
+    },
+    "miss_param_eval": {
+      "count": 100,
+      "file": "miss_param_eval.json",
+      "sha256": "204769e522f6dc74cc757a95b8f3f96a36497f11f86b69a4bee1d9fc32d8f529"
+    },
+    "miss_param_test75": {
+      "count": 75,
+      "file": "miss_param_test75.json",
+      "sha256": "be7b7df0fdbd1460f540ae52d417fb226320ed34466cd8d2f27cf857ef3f6da7"
+    },
+    "miss_param_train": {
+      "count": 100,
+      "file": "miss_param_train.json",
+      "sha256": "abd89951cee0171c9122a6bfb59ee089052e8fbfc77af966ebdd173e45b63d7a"
+    },
+    "miss_param_val": {
+      "count": 25,
+      "file": "miss_param_val.json",
+      "sha256": "d4e8d7e199b35dae41a0511d8817d8ccfdcf3015fd005791a8a3a6692471f9ee"
+    }
+  },
+  "seed": 42,
+  "source": {
+    "aworld_commit": "be52dbf33051c9b86e8e4d3c4e2394548906c75b",
+    "aworld_parquet_sha256": {
+      "bfcl_test.parquet": "07c029b1ada124c489fe6c8550bbdb7328be639e2d4ef0f5a91011314746eea5",
+      "bfcl_train.parquet": "f6c9311b3b7977b307fcb8d175603e828dbca0542bb3abca4f4bdf922bc8f293",
+      "bfcl_train_base.parquet": "0aed21d77b1332487716958e324a94fd36b1c8486f97b3f61257ee66c3a93999",
+      "bfcl_val.parquet": "e67fe4196eeff57bd6776ee841c5203e816445027a8b1d2567e4a8c9c03ae82e"
+    },
+    "aworld_repository": "https://github.com/inclusionAI/AWorld-RL",
+    "t3rl_commit": "b35cac923afe88844e613e858336f9a873332ef8",
+    "t3rl_preprocessor": "data/preprocess_bfcl_data.py",
+    "t3rl_repository": "https://github.com/IcyFish332/T3RL"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "_doc": "GA-GRPO methods for run.py. Guide assistance, handoff unit, initialization and selection are independent switches.",
+  "grpo": {
+    "bfcl": {
+      "ALGO": "grpo",
+      "BFCL_CURRICULUM": "0"
+    },
+    "appworld": {}
+  },
+  "dapo": {
+    "bfcl": {
+      "ALGO": "dapo",
+      "BFCL_CURRICULUM": "0"
+    },
+    "appworld": {}
+  },
+  "ga-grpo": {
+    "bfcl": {
+      "ALGO": "grpo",
+      "BFCL_CURRICULUM": "1"
+    },
+    "appworld": {}
+  },
+  "need-based-ga-grpo": {
+    "bfcl": {
+      "ALGO": "grpo",
+      "BFCL_CURRICULUM": "1",
+      "BFCL_CURRICULUM_INIT": "autonomous"
+    },
+    "appworld": {}
+  },
+  "ga-grpo-call-second-last": {
+    "bfcl": {
+      "ALGO": "grpo",
+      "BFCL_CURRICULUM": "1",
+      "BFCL_HANDOFF_UNIT": "call",
+      "BFCL_CURRICULUM_INIT": "second_last_turn"
+    }
+  },
+  "ga-grpo-call-bandit": {
+    "bfcl": {
+      "ALGO": "grpo",
+      "BFCL_CURRICULUM": "1",
+      "BFCL_HANDOFF_UNIT": "call",
+      "BFCL_CURRICULUM_INIT": "second_last_turn",
+      "BFCL_H_SELECTOR": "bandit"
+    },
+    "appworld": {
+      "EXP2_H_SELECTOR": "bandit"
+    }
+  },
+  "ga-grpo-call-uniform": {
+    "bfcl": {
+      "ALGO": "grpo",
+      "BFCL_CURRICULUM": "1",
+      "BFCL_HANDOFF_UNIT": "call",
+      "BFCL_CURRICULUM_INIT": "second_last_turn",
+      "BFCL_H_SELECTOR": "uniform"
+    },
+    "appworld": {
+      "EXP2_H_SELECTOR": "uniform"
+    }
+  }
+}

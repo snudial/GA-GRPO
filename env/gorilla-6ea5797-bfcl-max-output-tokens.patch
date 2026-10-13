@@ -1,0 +1,24 @@
+diff --git a/berkeley-function-call-leaderboard/bfcl_eval/model_handler/local_inference/base_oss_handler.py b/berkeley-function-call-leaderboard/bfcl_eval/model_handler/local_inference/base_oss_handler.py
+index 2697560..29681a8 100644
+--- a/berkeley-function-call-leaderboard/bfcl_eval/model_handler/local_inference/base_oss_handler.py
++++ b/berkeley-function-call-leaderboard/bfcl_eval/model_handler/local_inference/base_oss_handler.py
+@@ -325,13 +325,17 @@ class OSSHandler(BaseHandler, EnforceOverrides):
+         # Tokenize the formatted prompt to get token count
+         input_token_count = len(self.tokenizer.tokenize(formatted_prompt))
+ 
+-        # Determine the number of tokens to request. Cap it at 4096 if the model has a larger limit.
++        # Keep BFCL's 4096-token default, with an explicit diagnostic override
++        # for reproducing papers that report a different rollout token cap.
++        per_request_max_tokens = int(os.getenv("BFCL_MAX_OUTPUT_TOKENS", "4096"))
++        if per_request_max_tokens <= 0:
++            raise ValueError("BFCL_MAX_OUTPUT_TOKENS must be positive")
+         if self.max_context_length < input_token_count + 2:
+             # If the prompt is already at the max length, just request 1000 token, we will get an error anyway
+             leftover_tokens_count = 1000
+         else:
+             leftover_tokens_count = min(
+-                4096,
++                per_request_max_tokens,
+                 self.max_context_length - input_token_count - 2,
+             )
+ 
